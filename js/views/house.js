@@ -116,7 +116,7 @@ export async function renderHouse(view, ctx) {
              <span class="flex -space-x-1.5 space-x-reverse">${loved.slice(0, 4).map((m) => avatar(m, 6)).join('')}</span></div>` : ''}
         </div>
         <div class="flex flex-1 flex-col gap-2 p-4">
-          <h3 class="text-xl leading-snug">${esc(r.title)}</h3>
+          <h3 class="text-xl leading-snug">${esc(r.title)}${r.has_link ? ' <span class="text-base" title="יש קישור למתכון באינטרנט">🌐</span>' : ''}</h3>
           ${r.description ? `<p class="line-clamp-2 text-sm text-cocoa-500">${esc(r.description)}</p>` : ''}
           <div class="mt-auto flex items-center justify-between pt-1 text-sm text-cocoa-500">
             ${difficultyIcons(r.difficulty, 'text-sm')}

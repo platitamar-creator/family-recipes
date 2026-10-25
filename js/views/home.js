@@ -1,7 +1,8 @@
 // דף הבית: הציטוט היומי, הבתים שהמכשיר מחובר אליהם ופתיחת בית חדש
 import { rpc } from '../api.js';
 import { getHouses, saveHouse } from '../store.js';
-import { esc, quoteCard, modal, onAction, busy, avatar, EMOJIS, $ } from '../ui.js';
+import { esc, quoteCard, modal, onAction, busy, avatar, toast, EMOJIS, $ } from '../ui.js';
+import { isStandalone, isIOS, canPrompt, promptInstall, onInstallChange, isDismissed, dismiss } from '../install.js';
 import { topBar } from './common.js';
 
 export async function renderHome(view) {
@@ -33,11 +34,81 @@ export async function renderHome(view) {
         <p class="mx-auto max-w-md text-sm text-cocoa-500">קיבלתם קישור הצטרפות מבן משפחה? פשוט פתחו אותו. אין בית עדיין? פתחו אחד עכשיו 👇</p>
       </section>`}
 
-    <section class="text-center">
+    <section class="mb-10 text-center">
       <button class="btn-primary px-6 py-3 text-lg" data-action="new-house">✨ פתיחת בית חדש</button>
-    </section>`);
+    </section>
 
-  onAction(view.app, { 'new-house': openCreateHouse });
+    <section class="card mb-5 p-5">
+      <h2 class="section-title mb-1">🔗 קיבלת קישור?</h2>
+      <p class="mb-3 text-sm text-cocoa-500">הדביקו כאן קישור הצטרפות, קישור לבית או קישור למתכון.</p>
+      <form id="paste-link" class="flex gap-2">
+        <input name="link" class="input text-left text-sm" dir="ltr" inputmode="url" placeholder="https://...#/join/..." required>
+        <button class="btn-soft shrink-0" type="submit">פתיחה</button>
+      </form>
+    </section>
+
+    <div id="install-slot"></div>`);
+
+  const app = view.app;
+  onAction(app, {
+    'new-house': openCreateHouse,
+    install: async () => {
+      if (await promptInstall()) toast('הותקן! עכשיו המטבח במסך הבית 🎉');
+      drawInstall();
+    },
+    'dismiss-install': () => {
+      dismiss();
+      drawInstall();
+    },
+  });
+
+  $('#paste-link', app).addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = new FormData(e.target).get('link').trim();
+    const m = text.match(/#\/(join|v|r)\/([A-Za-z0-9_-]{20,})/);
+    if (!m) return toast('זה לא נראה כמו קישור של ספר המתכונים 🤔', 'error');
+    location.hash = `#/${m[1]}/${m[2]}`;
+  });
+
+  function drawInstall() {
+    const slot = $('#install-slot', app);
+    if (!slot || !app.isConnected) return;
+    slot.innerHTML = installCard();
+  }
+  onInstallChange(drawInstall);
+  drawInstall();
+}
+
+// כרטיס "להוסיף למסך הבית"
+function installCard() {
+  if (isStandalone() || isDismissed()) return '';
+  const close = '<button data-action="dismiss-install" class="absolute left-3 top-3 text-cocoa-300 hover:text-cocoa-700" title="לא עכשיו">✕</button>';
+  if (canPrompt()) {
+    return `<section class="card relative flex items-center gap-4 p-5">${close}
+      <img src="icons/icon-192.png" alt="" class="h-14 w-14 rounded-2xl shadow-soft">
+      <div class="flex-1"><h2 class="font-display text-lg">📲 המטבח במסך הבית</h2>
+        <p class="text-sm text-cocoa-500">התקינו את ספר המתכונים כמו אפליקציה, ותפתחו אותו בלחיצה אחת.</p></div>
+      <button data-action="install" class="btn-primary shrink-0">התקנה</button>
+    </section>`;
+  }
+  if (isIOS()) {
+    return `<section class="card relative p-5">${close}
+      <div class="mb-3 flex items-center gap-3">
+        <img src="icons/icon-192.png" alt="" class="h-12 w-12 rounded-2xl shadow-soft">
+        <h2 class="font-display text-lg">📲 להוסיף את המטבח למסך הבית</h2>
+      </div>
+      <ol class="mb-3 space-y-1.5 text-sm">
+        <li>1. פתחו את האתר ב-<b>Safari</b></li>
+        <li>2. לחצו על כפתור השיתוף <span class="inline-block rounded bg-cream-200 px-1.5">⬆️</span> בתחתית המסך</li>
+        <li>3. בחרו <b>"הוספה למסך הבית"</b> ואז <b>"הוסף"</b></li>
+      </ol>
+      <p class="rounded-xl bg-honey-100 p-3 text-xs leading-relaxed text-cocoa-700">💡 באייפון האפליקציה לא זוכרת את הכניסה מ-Safari. בפתיחה הראשונה, הדביקו בתיבה "קיבלת קישור?" את קישור ההצטרפות ובחרו את השם שלכם.</p>
+    </section>`;
+  }
+  return `<section class="card relative flex items-center gap-4 p-5">${close}
+    <img src="icons/icon-192.png" alt="" class="h-12 w-12 rounded-2xl shadow-soft">
+    <p class="text-sm text-cocoa-700"><b>📲 רוצים את זה כאפליקציה?</b><br>בתפריט הדפדפן (⋮) בחרו "התקנת אפליקציה" או "הוספה למסך הבית".</p>
+  </section>`;
 }
 
 function openCreateHouse() {

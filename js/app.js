@@ -19,6 +19,7 @@ import { renderRecipe } from './views/recipe.js';
 import { renderEditor } from './views/editor.js';
 import { renderTags } from './views/tags.js';
 import { renderSettings } from './views/settings.js';
+import { registerServiceWorker } from './install.js';
 
 // הקשר הגישה: איזה קוד שולחים לשרת, ומה כתובת הבסיס לקישורים פנימיים
 function memberCtx(houseId) {
@@ -88,3 +89,4 @@ async function route() {
 
 window.addEventListener('hashchange', route);
 route();
+registerServiceWorker();

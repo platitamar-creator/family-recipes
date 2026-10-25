@@ -11,6 +11,16 @@ import { topBar, shareLinks } from './common.js';
 // מצב הממשק נשמר בין רענונים של אותו מתכון
 const ui = { shopMode: false, doneSteps: new Set(), recipeId: null };
 
+// רק קישורי http/https, למקרה שמשהו מוזר נכנס
+const safeUrl = (u) => (/^https?:\/\//i.test(u) ? u : '#');
+const hostOf = (u) => {
+  try {
+    return new URL(u).hostname.replace(/^www\./, '');
+  } catch {
+    return u;
+  }
+};
+
 const FACES = (s) => (s >= 10 ? '🤩' : s >= 8 ? '😋' : s >= 6 ? '🙂' : s >= 4 ? '😐' : '😖');
 
 // cached: נתונים שכבר נטענו, לשינויי תצוגה מקומיים (סימון שלב, רשימת קניות) בלי לפנות לשרת
@@ -65,6 +75,12 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
         ${r.servings ? `<span class="chip bg-white shadow-soft">🍽️ ${esc(r.servings)}</span>` : ''}
       </div>
       ${r.tags.length ? `<div class="mb-3 flex flex-wrap gap-1.5">${r.tags.map((t) => tagChip(t)).join('')}</div>` : ''}
+      ${r.source_url ? `<a href="${esc(safeUrl(r.source_url))}" target="_blank" rel="noopener noreferrer"
+          class="mb-3 flex items-center gap-3 rounded-2xl border-2 border-dashed border-sage-300 bg-sage-50 px-4 py-3 transition hover:bg-sage-100">
+          <span class="text-2xl">🌐</span>
+          <span class="min-w-0 flex-1"><span class="block text-sm font-medium text-sage-700">המתכון המקורי באינטרנט</span>
+            <span class="block truncate text-xs text-cocoa-500" dir="ltr">${esc(hostOf(r.source_url))}</span></span>
+          <span class="btn-sage btn-sm shrink-0">פתיחה ↗</span></a>` : ''}
       <p class="text-xs text-cocoa-500">
         ${r.created_by ? `נוסף ע״י ${esc(r.created_by.name)} · ` : ''}${formatDate(r.created_at)}
         ${r.updated_by && r.updated_at !== r.created_at ? ` · עודכן ${timeAgo(r.updated_at)} ע״י ${esc(r.updated_by.name)}` : ''}

@@ -1,10 +1,44 @@
 // הוספה ועריכה של מתכון (בני בית בלבד)
 import { rpc, imageUrl, deleteImages } from '../api.js';
 import { uploadImages } from '../images.js';
-import { esc, loading, toast, showError, onAction, $, $$, DIFFICULTY } from '../ui.js';
+import { esc, loading, toast, showError, onAction, modal, busy, $, $$, DIFFICULTY, TAG_COLORS } from '../ui.js';
 import { topBar } from './common.js';
 
 const MAX_IMAGES = 12;
+
+// טיוטות: כל שינוי נשמר, כדי שמעבר לניהול תגיות (או רענון של הדף) לא ימחק את מה שהקלדתם.
+// תמונות חדשות נשמרות רק בזיכרון של הלשונית (אי אפשר לשמור קבצים ב-sessionStorage).
+const drafts = new Map();
+const draftKey = (ctx, recipeId) => `frb.draft.${ctx.houseId}.${recipeId || 'new'}`;
+
+function loadDraft(key) {
+  if (drafts.has(key)) return drafts.get(key);
+  try {
+    const d = JSON.parse(sessionStorage.getItem(key));
+    if (d) d.images = d.images.filter((i) => i.path);
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+function storeDraft(key, d) {
+  drafts.set(key, d);
+  try {
+    sessionStorage.setItem(key, JSON.stringify({ ...d, images: d.images.filter((i) => i.path) }));
+  } catch {
+    /* אין מקום או גלישה פרטית: נשאר רק בזיכרון */
+  }
+}
+
+export function clearDraft(key) {
+  drafts.delete(key);
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    /* כלום */
+  }
+}
 
 // "מצרך בכל שורה. שורה שמסתיימת בנקודתיים היא כותרת"
 const ingredientsToText = (list) => list.map((i) => (i.header ? `${i.text}:` : i.text)).join('\n');
@@ -24,29 +58,52 @@ export async function renderEditor(view, ctx, recipeId) {
   ]);
   if (!view.isCurrent()) return;
 
-  const r = existing?.recipe || { title: '', description: '', difficulty: 2, ingredients: [], steps: [{ text: '' }], images: [], tags: [] };
-  const selectedTags = new Set(r.tags.map((t) => t.id));
-  // תמונות: קיימות (path) או חדשות (file)
-  let images = r.images.map((img) => ({ path: img.path, width: img.width, height: img.height }));
-  const originalPaths = images.map((i) => i.path);
-  let steps = r.steps.length ? r.steps.map((s) => s.text) : [''];
-  let difficulty = r.difficulty;
+  const r = existing?.recipe || { title: '', description: '', difficulty: 2, ingredients: [], steps: [{ text: '' }], images: [], tags: [], source_url: '' };
+  const key = draftKey(ctx, recipeId);
+  const allTagIds = new Set(house.tag_groups.flatMap((g) => g.tags.map((t) => t.id)));
+  const draft = loadDraft(key);
+
+  // מצב הטופס: מהטיוטה אם יש, אחרת מהמתכון
+  const d = draft || {
+    title: r.title,
+    description: r.description,
+    difficulty: r.difficulty,
+    prep: r.prep_minutes ?? '',
+    cook: r.cook_minutes ?? '',
+    servings: r.servings ?? '',
+    source_url: r.source_url ?? '',
+    ingredients: ingredientsToText(r.ingredients),
+    steps: r.steps.length ? r.steps.map((s) => s.text) : [''],
+    tags: r.tags.map((t) => t.id),
+    // תמונות: קיימות (path) או חדשות (file)
+    images: r.images.map((img) => ({ path: img.path, width: img.width, height: img.height })),
+    originalPaths: r.images.map((img) => img.path),
+  };
+  const selectedTags = new Set(d.tags.filter((id) => allTagIds.has(id)));
+  let images = d.images;
+  const originalPaths = d.originalPaths;
+  let steps = d.steps.length ? d.steps : [''];
+  let difficulty = d.difficulty;
 
   const backHref = recipeId ? `${ctx.base}/r/${recipeId}` : ctx.base;
 
   view.mount(`
     ${topBar({ back: backHref, backLabel: recipeId ? 'חזרה למתכון' : house.house.name })}
     <h1 class="mb-6 text-3xl">${recipeId ? '✏️ עריכת מתכון' : '✨ מתכון חדש'}</h1>
+    ${draft ? `<div class="mb-5 flex items-center justify-between gap-3 rounded-2xl bg-honey-100 px-4 py-3 text-sm">
+      <span>📝 המשכנו מאיפה שעצרת. כל מה שהקלדת נשמר.</span>
+      <button type="button" data-action="discard-draft" class="btn-ghost btn-sm shrink-0">להתחיל מחדש</button>
+    </div>` : ''}
 
     <form id="recipe-form" class="space-y-5">
       <section class="card space-y-4 p-5">
         <div>
           <label class="label" for="f-title">שם המתכון *</label>
-          <input id="f-title" class="input text-lg" maxlength="120" required value="${esc(r.title)}" placeholder="למשל: העוגה של סבתא רחל">
+          <input id="f-title" class="input text-lg" maxlength="120" required value="${esc(d.title)}" placeholder="למשל: העוגה של סבתא רחל">
         </div>
         <div>
           <label class="label" for="f-desc">כמה מילים על המתכון</label>
-          <textarea id="f-desc" class="input min-h-[80px]" maxlength="2000" placeholder="מאיפה הוא הגיע? למה כולם מבקשים אותו?">${esc(r.description)}</textarea>
+          <textarea id="f-desc" class="input min-h-[80px]" maxlength="2000" placeholder="מאיפה הוא הגיע? למה כולם מבקשים אותו?">${esc(d.description)}</textarea>
         </div>
         <div>
           <span class="label">רמת קושי</span>
@@ -60,9 +117,14 @@ export async function renderEditor(view, ctx, recipeId) {
           <p id="diff-label" class="mt-1.5 text-sm text-cocoa-500"></p>
         </div>
         <div class="grid grid-cols-3 gap-3">
-          <div><label class="label" for="f-prep">הכנה (דקות)</label><input id="f-prep" type="number" min="0" max="10000" inputmode="numeric" class="input" value="${r.prep_minutes ?? ''}"></div>
-          <div><label class="label" for="f-cook">בישול (דקות)</label><input id="f-cook" type="number" min="0" max="10000" inputmode="numeric" class="input" value="${r.cook_minutes ?? ''}"></div>
-          <div><label class="label" for="f-serv">כמות</label><input id="f-serv" class="input" maxlength="40" value="${esc(r.servings ?? '')}" placeholder="6 מנות"></div>
+          <div><label class="label" for="f-prep">הכנה (דקות)</label><input id="f-prep" type="number" min="0" max="10000" inputmode="numeric" class="input" value="${esc(d.prep)}"></div>
+          <div><label class="label" for="f-cook">בישול (דקות)</label><input id="f-cook" type="number" min="0" max="10000" inputmode="numeric" class="input" value="${esc(d.cook)}"></div>
+          <div><label class="label" for="f-serv">כמות</label><input id="f-serv" class="input" maxlength="40" value="${esc(d.servings)}" placeholder="6 מנות"></div>
+        </div>
+        <div>
+          <label class="label" for="f-link">🔗 קישור למתכון באינטרנט (לא חובה)</label>
+          <input id="f-link" type="text" inputmode="url" autocomplete="off" spellcheck="false" dir="ltr" class="input text-left" maxlength="1000" value="${esc(d.source_url)}" placeholder="https://...">
+          <p class="mt-1 text-xs text-cocoa-500">מצאתם מתכון באתר? אפשר לשמור רק את השם והקישור, ולהשלים את השאר מתי שבא לכם.</p>
         </div>
       </section>
 
@@ -76,7 +138,7 @@ export async function renderEditor(view, ctx, recipeId) {
       <section class="card p-5">
         <h2 class="section-title mb-1">🧺 מצרכים</h2>
         <p class="mb-3 text-sm text-cocoa-500">כל מצרך בשורה נפרדת. שורה שמסתיימת בנקודתיים היא כותרת, למשל <b>לרוטב:</b></p>
-        <textarea id="f-ingr" class="input min-h-[180px] leading-relaxed" placeholder="2 כוסות קמח&#10;1 כוס סוכר&#10;3 ביצים&#10;&#10;לציפוי:&#10;100 גרם שוקולד מריר">${esc(ingredientsToText(r.ingredients))}</textarea>
+        <textarea id="f-ingr" class="input min-h-[180px] leading-relaxed" placeholder="2 כוסות קמח&#10;1 כוס סוכר&#10;3 ביצים&#10;&#10;לציפוי:&#10;100 גרם שוקולד מריר">${esc(d.ingredients)}</textarea>
       </section>
 
       <section class="card p-5">
@@ -87,7 +149,7 @@ export async function renderEditor(view, ctx, recipeId) {
 
       <section class="card p-5">
         <h2 class="section-title mb-1">🏷️ תגיות</h2>
-        <p class="mb-3 text-sm text-cocoa-500">עוזרות למצוא את המתכון בחיפוש. <a href="${ctx.base}/tags" class="text-spice-600 underline">ניהול תגיות</a></p>
+        <p class="mb-3 text-sm text-cocoa-500">עוזרות למצוא את המתכון בחיפוש.</p>
         <div class="space-y-3">
           ${house.tag_groups.filter((g) => g.tags.length).map((g) => `
             <div class="flex flex-wrap items-center gap-2">
@@ -95,11 +157,15 @@ export async function renderEditor(view, ctx, recipeId) {
               ${g.tags.map((t) => `<button type="button" class="chip-toggle ${selectedTags.has(t.id) ? 'is-on' : ''}" data-tag="${esc(t.id)}">${esc(t.name)}</button>`).join('')}
             </div>`).join('') || '<p class="text-cocoa-500">אין עדיין תגיות.</p>'}
         </div>
+        <div class="mt-4 flex flex-wrap gap-2 border-t border-cream-200 pt-3">
+          <button type="button" data-action="new-tag" class="btn-soft btn-sm">➕ תגית חדשה</button>
+          <a href="${ctx.base}/tags" data-action="manage-tags" class="btn-ghost btn-sm">🏷️ ניהול תגיות <span class="text-xs text-cocoa-500">(המתכון יישמר כטיוטה)</span></a>
+        </div>
       </section>
 
       <div class="sticky bottom-3 z-10 flex gap-2 rounded-3xl bg-cream-100/90 p-2 backdrop-blur">
         <button type="submit" id="save" class="btn-primary flex-1 py-3 text-lg">${recipeId ? 'שמירת השינויים 💾' : 'הוספה לספר המתכונים 📖'}</button>
-        <a href="${backHref}" class="btn-soft py-3">ביטול</a>
+        <a href="${backHref}" data-action="cancel" class="btn-soft py-3">ביטול</a>
       </div>
     </form>`);
 
@@ -113,7 +179,7 @@ export async function renderEditor(view, ctx, recipeId) {
     $('#diff-label', app).textContent = DIFFICULTY[difficulty].label;
   }
 
-  function drawImages() {
+  let drawImages = function () {
     const box = $('#images', app);
     box.innerHTML = images.map((img, i) => `
       <div class="group relative aspect-square overflow-hidden rounded-2xl bg-cream-200 shadow-soft">
@@ -130,7 +196,7 @@ export async function renderEditor(view, ctx, recipeId) {
       <button type="button" data-action="img-add" class="flex aspect-square flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-spice-300 bg-spice-100/40 text-spice-700 transition hover:bg-spice-100">
         <span class="text-3xl">📷</span><span class="text-xs font-medium">הוספת תמונות</span>
       </button>` : '');
-  }
+  };
 
   function drawSteps() {
     $('#steps', app).innerHTML = steps.map((s, i) => `
@@ -141,9 +207,37 @@ export async function renderEditor(view, ctx, recipeId) {
       </div>`).join('');
   }
 
+  // שמירת טיוטה אחרי כל שינוי (עד שיוצאים מהעריכה בשמירה, ביטול או התחלה מחדש)
+  let finished = false;
+  function saveDraft() {
+    if (finished || !app.isConnected) return;
+    storeDraft(key, {
+      title: $('#f-title', app).value,
+      description: $('#f-desc', app).value,
+      difficulty,
+      prep: $('#f-prep', app).value,
+      cook: $('#f-cook', app).value,
+      servings: $('#f-serv', app).value,
+      source_url: $('#f-link', app).value,
+      ingredients: $('#f-ingr', app).value,
+      steps,
+      tags: [...selectedTags],
+      images,
+      originalPaths,
+    });
+  }
+  const _drawImages = drawImages;
+  drawImages = () => {
+    _drawImages();
+    saveDraft();
+  };
+
   drawDifficulty();
-  drawImages();
+  _drawImages();
   drawSteps();
+  // הטופס השתנה (הקלדה, בחירה) → טיוטה
+  $('#recipe-form', app).addEventListener('input', saveDraft);
+  $('#recipe-form', app).addEventListener('click', () => setTimeout(saveDraft, 0));
 
   $('#diff-pick', app).addEventListener('click', (e) => {
     const b = e.target.closest('[data-diff]');
@@ -195,7 +289,84 @@ export async function renderEditor(view, ctx, recipeId) {
       if (!steps.length) steps = [''];
       drawSteps();
     },
+    'new-tag': () => openNewTag(),
+    'manage-tags': () => {
+      saveDraft();
+      try {
+        sessionStorage.setItem('frb.returnTo', location.hash);
+      } catch {
+        /* כלום */
+      }
+      location.hash = `${ctx.base}/tags`;
+    },
+    'discard-draft': () => {
+      finished = true;
+      clearDraft(key);
+      renderEditor(view, ctx, recipeId);
+    },
+    cancel: () => {
+      finished = true;
+      clearDraft(key);
+      location.hash = backHref;
+    },
   });
+
+  // תגית חדשה בלי לצאת מהמתכון
+  function openNewTag() {
+    const groups = house.tag_groups;
+    let color = TAG_COLORS[Math.floor(Math.random() * TAG_COLORS.length)];
+    const { el, close } = modal(`
+      <h2 class="mb-4 text-2xl">תגית חדשה 🏷️</h2>
+      <form class="space-y-4">
+        <div><label class="label">שם</label><input name="name" class="input" maxlength="40" required placeholder="למשל: ללא גלוטן"></div>
+        <div><label class="label">קבוצה</label>
+          <select name="group" class="input">
+            ${groups.map((g) => `<option value="${esc(g.id)}">${esc(g.icon)} ${esc(g.name)}</option>`).join('')}
+            <option value="__new">➕ קבוצה חדשה...</option>
+          </select></div>
+        <div data-new-group class="${groups.length ? 'hidden' : ''}"><label class="label">שם הקבוצה החדשה</label>
+          <input name="groupName" class="input" maxlength="40" placeholder="למשל: מטבח, חגים"></div>
+        <div><span class="label">צבע</span>
+          <div class="flex flex-wrap gap-2" data-colors>
+            ${TAG_COLORS.map((c) => `<button type="button" data-color="${c}" class="h-9 w-9 rounded-full border-2 ${c === color ? 'border-cocoa-700' : 'border-white'}" style="background:${c}"></button>`).join('')}
+          </div></div>
+        <div class="flex gap-2 pt-2">
+          <button class="btn-primary flex-1" type="submit">הוספה וסימון במתכון</button>
+          <button type="button" class="btn-soft" data-close>ביטול</button>
+        </div>
+      </form>`);
+    const select = el.querySelector('[name=group]');
+    if (!groups.length) select.value = '__new';
+    select.addEventListener('change', () => el.querySelector('[data-new-group]').classList.toggle('hidden', select.value !== '__new'));
+    el.querySelector('[data-colors]').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-color]');
+      if (!b) return;
+      color = b.dataset.color;
+      el.querySelectorAll('[data-color]').forEach((x) => {
+        x.classList.toggle('border-cocoa-700', x === b);
+        x.classList.toggle('border-white', x !== b);
+      });
+    });
+    el.querySelector('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      busy(e.target.querySelector('[type=submit]'), async () => {
+        let groupId = fd.get('group');
+        if (groupId === '__new') {
+          groupId = await rpc('save_tag_group', { p_token: ctx.token, p_id: null, p_name: fd.get('groupName'), p_icon: '🏷️', p_sort: null });
+        }
+        const tagId = await rpc('save_tag', { p_token: ctx.token, p_id: null, p_group_id: groupId, p_name: fd.get('name'), p_color: color, p_sort: null });
+        selectedTags.add(tagId);
+        saveDraft();
+        close();
+        toast('התגית נוספה ✓');
+        // טוענים מחדש עם הטיוטה, כדי שהתגית החדשה תופיע
+        const y = window.scrollY;
+        await renderEditor(view, ctx, recipeId);
+        window.scrollTo({ top: y });
+      });
+    });
+  }
 
   $('#recipe-form', app).addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -222,6 +393,7 @@ export async function renderEditor(view, ctx, recipeId) {
           prep_minutes: $('#f-prep', app).value,
           cook_minutes: $('#f-cook', app).value,
           servings: $('#f-serv', app).value,
+          source_url: $('#f-link', app).value,
           ingredients: textToIngredients($('#f-ingr', app).value),
           steps: steps.map((s) => s.trim()).filter(Boolean).map((text) => ({ text })),
           tag_ids: [...selectedTags],
@@ -230,6 +402,8 @@ export async function renderEditor(view, ctx, recipeId) {
       });
       const kept = new Set(images.map((i) => i.path));
       await deleteImages(ctx.token, originalPaths.filter((p) => !kept.has(p)));
+      finished = true;
+      clearDraft(key);
       toast(recipeId ? 'נשמר! 💾' : 'המתכון נכנס לספר! 🎉');
       location.hash = `${ctx.base}/r/${id}`;
     } catch (err) {

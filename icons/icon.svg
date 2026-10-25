@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="30%" cy="25%" r="85%">
+      <stop offset="0" stop-color="#F3AC7A"/><stop offset=".6" stop-color="#E07A3F"/><stop offset="1" stop-color="#C9622A"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- ספר פתוח -->
+  <g transform="translate(256 278)">
+    <path d="M-170 -110 Q-90 -140 0 -100 L0 120 Q-90 82 -170 108 Z" fill="#FFFBF5"/>
+    <path d="M170 -110 Q90 -140 0 -100 L0 120 Q90 82 170 108 Z" fill="#FDF5E9"/>
+    <path d="M-170 108 Q-90 82 0 120 Q90 82 170 108 L170 126 Q90 100 0 140 Q-90 100 -170 126 Z" fill="#A14C20" opacity=".55"/>
+    <path d="M0 -100 L0 120" stroke="#F0D9B5" stroke-width="6"/>
+    <g stroke="#F0D9B5" stroke-width="10" stroke-linecap="round" fill="none">
+      <path d="M-140 -70 Q-90 -86 -30 -64"/><path d="M-140 -36 Q-90 -52 -30 -30"/><path d="M-140 -2 Q-90 -18 -30 4"/>
+      <path d="M30 -64 Q90 -86 140 -70"/><path d="M30 -30 Q90 -52 140 -36"/>
+    </g>
+    <!-- לב -->
+    <path d="M85 30 C85 8 115 2 122 24 C129 2 159 8 159 30 C159 56 122 72 122 80 C122 72 85 56 85 30 Z" fill="#C4626B"/>
+  </g>
+  <!-- כף עץ -->
+  <g transform="translate(372 120) rotate(35)">
+    <ellipse cx="0" cy="0" rx="26" ry="38" fill="#F7D27A"/>
+    <rect x="-7" y="30" width="14" height="110" rx="7" fill="#F7D27A"/>
+  </g>
+</svg>

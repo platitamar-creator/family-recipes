@@ -5,7 +5,22 @@ import { topBar } from './common.js';
 
 const GROUP_ICONS = ['🏷️', '🥛', '🌤️', '⏱️', '🍲', '🍽️', '🌍', '🎉', '👶', '🌱', '💪', '❤️', '🕯️', '🔥'];
 
+// אם הגענו מעריכת מתכון, כפתור החזרה מחזיר אליה (הטיוטה מחכה שם)
+let returnTo = null;
+window.addEventListener('hashchange', () => {
+  if (!location.hash.endsWith('/tags')) returnTo = null;
+});
+
 export async function renderTags(view, ctx) {
+  try {
+    const r = sessionStorage.getItem('frb.returnTo');
+    if (r) {
+      returnTo = r.startsWith(`${ctx.base}/edit/`) ? r : null;
+      sessionStorage.removeItem('frb.returnTo');
+    }
+  } catch {
+    /* כלום */
+  }
   if (!view.app.querySelector('[data-tags-page]')) view.app.innerHTML = loading('מסדרים את המגירות...');
   const data = await rpc('get_house', { p_token: ctx.token });
   if (!view.isCurrent()) return;
@@ -17,7 +32,9 @@ export async function renderTags(view, ctx) {
 
   view.mount(`
     <div data-tags-page>
-    ${topBar({ back: ctx.base, backLabel: data.house.name })}
+    ${topBar(returnTo ? { back: returnTo, backLabel: 'חזרה לעריכת המתכון' } : { back: ctx.base, backLabel: data.house.name })}
+    ${returnTo ? `<a href="${returnTo}" class="mb-5 flex items-center justify-between gap-3 rounded-2xl bg-honey-100 px-4 py-3 text-sm">
+      <span>📝 המתכון שהתחלת שמור כטיוטה.</span><span class="btn-primary btn-sm">חזרה למתכון ←</span></a>` : ''}
     <h1 class="mb-1 text-3xl">🏷️ ניהול תגיות</h1>
     <p class="mb-6 text-cocoa-500">התגיות מופיעות בחיפוש ובעריכת מתכון. אפשר להוסיף, לשנות שם וצבע, ולמחוק.</p>
 
