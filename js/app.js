@@ -19,7 +19,7 @@ import { renderRecipe } from './views/recipe.js';
 import { renderEditor } from './views/editor.js';
 import { renderTags } from './views/tags.js';
 import { renderSettings } from './views/settings.js';
-import { registerServiceWorker } from './install.js';
+import { registerServiceWorker, handleInstallClick } from './install.js';
 
 // הקשר הגישה: איזה קוד שולחים לשרת, ומה כתובת הבסיס לקישורים פנימיים
 function memberCtx(houseId) {
@@ -88,5 +88,9 @@ async function route() {
 }
 
 window.addEventListener('hashchange', route);
+// כפתור ההתקנה (📲) מופיע בכל מסך
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-install]')) handleInstallClick();
+});
 route();
 registerServiceWorker();

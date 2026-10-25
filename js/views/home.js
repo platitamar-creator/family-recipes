@@ -2,7 +2,7 @@
 import { rpc } from '../api.js';
 import { getHouses, saveHouse } from '../store.js';
 import { esc, quoteCard, modal, onAction, busy, avatar, toast, EMOJIS, $ } from '../ui.js';
-import { isStandalone, isIOS, canPrompt, promptInstall, onInstallChange, isDismissed, dismiss } from '../install.js';
+import { isStandalone, isIOS, canPrompt, onInstallChange, isDismissed, dismiss } from '../install.js';
 import { topBar } from './common.js';
 
 export async function renderHome(view) {
@@ -11,6 +11,7 @@ export async function renderHome(view) {
   view.mount(`
     ${topBar()}
     <section class="mb-8 animate-rise">${quoteCard()}</section>
+    <div id="install-slot" class="mb-8 empty:mb-0"></div>
 
     ${houses.length ? `
       <section class="mb-8">
@@ -46,16 +47,11 @@ export async function renderHome(view) {
         <button class="btn-soft shrink-0" type="submit">פתיחה</button>
       </form>
     </section>
-
-    <div id="install-slot"></div>`);
+`);
 
   const app = view.app;
   onAction(app, {
     'new-house': openCreateHouse,
-    install: async () => {
-      if (await promptInstall()) toast('הותקן! עכשיו המטבח במסך הבית 🎉');
-      drawInstall();
-    },
     'dismiss-install': () => {
       dismiss();
       drawInstall();
@@ -88,7 +84,7 @@ function installCard() {
       <img src="icons/icon-192.png" alt="" class="h-14 w-14 rounded-2xl shadow-soft">
       <div class="flex-1"><h2 class="font-display text-lg">📲 המטבח במסך הבית</h2>
         <p class="text-sm text-cocoa-500">התקינו את ספר המתכונים כמו אפליקציה, ותפתחו אותו בלחיצה אחת.</p></div>
-      <button data-action="install" class="btn-primary shrink-0">התקנה</button>
+      <button data-install class="btn-primary shrink-0">התקנה</button>
     </section>`;
   }
   if (isIOS()) {
@@ -107,7 +103,8 @@ function installCard() {
   }
   return `<section class="card relative flex items-center gap-4 p-5">${close}
     <img src="icons/icon-192.png" alt="" class="h-12 w-12 rounded-2xl shadow-soft">
-    <p class="text-sm text-cocoa-700"><b>📲 רוצים את זה כאפליקציה?</b><br>בתפריט הדפדפן (⋮) בחרו "התקנת אפליקציה" או "הוספה למסך הבית".</p>
+    <p class="flex-1 text-sm text-cocoa-700"><b>📲 רוצים את זה כאפליקציה?</b><br>שתי לחיצות, והמטבח במסך הבית.</p>
+    <button data-install class="btn-primary shrink-0">איך?</button>
   </section>`;
 }
 
