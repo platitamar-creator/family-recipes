@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-tap-highlight-color: transparent; }
+  body {
+    @apply bg-cream-100 text-cocoa-900 font-sans antialiased;
+    background-image: radial-gradient(rgba(224, 122, 63, 0.09) 1.2px, transparent 1.2px);
+    background-size: 22px 22px;
+  }
+  h1, h2, h3 { @apply font-display; }
+  ::selection { @apply bg-spice-200; }
+}
+
+@layer components {
+  .card { @apply bg-white/90 rounded-3xl shadow-soft border border-cream-200; }
+  .btn { @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl px-4 py-2.5 font-medium transition active:scale-95 disabled:opacity-50 disabled:pointer-events-none; }
+  .btn-primary { @apply btn bg-spice-500 text-white hover:bg-spice-600 shadow-[0_3px_0_#A14C20]; }
+  .btn-sage { @apply btn bg-sage-500 text-white hover:bg-sage-600 shadow-[0_3px_0_#4A6A4E]; }
+  .btn-soft { @apply btn bg-cream-200 text-cocoa-700 hover:bg-cream-300; }
+  .btn-ghost { @apply btn text-cocoa-700 hover:bg-cream-200; }
+  .btn-sm { @apply px-3 py-1.5 text-sm rounded-xl; }
+  .input { @apply w-full rounded-2xl border-2 border-cream-200 bg-cream-50 px-4 py-2.5 text-cocoa-900 placeholder:text-cocoa-300 focus:border-spice-300 focus:bg-white focus:outline-none transition; }
+  .label { @apply block text-sm font-medium text-cocoa-700 mb-1.5; }
+  .chip { @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm border-2 border-transparent transition select-none; }
+  .chip-toggle { @apply chip cursor-pointer bg-white border-cream-200 text-cocoa-700 hover:border-spice-200; }
+  .chip-toggle.is-on { @apply bg-spice-500 border-spice-500 text-white shadow-[0_2px_0_#A14C20]; }
+  .section-title { @apply font-display text-xl text-cocoa-900 flex items-center gap-2; }
+  .avatar { @apply inline-flex items-center justify-center rounded-full text-white font-bold shrink-0 ring-2 ring-white; }
+  /* דף מחברת ליומן ההערות */
+  .notebook {
+    background-color: #FFFDF7;
+    background-image: linear-gradient(transparent 31px, rgba(122, 158, 126, 0.25) 32px);
+    background-size: 100% 32px;
+  }
+  .sticky-note { @apply bg-honey-100 rounded-2xl shadow-soft; transform: rotate(-1.2deg); }
+}
+
+@layer utilities {
+  .scrollbar-none { scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+}
+
+/* הדפסת מתכון: רק המתכון, בלי כפתורים וטפסים */
+@media print {
+  body { background: #fff; }
+  header, button, form, details, #toasts, [data-action] { display: none !important; }
+  .card, .notebook { box-shadow: none !important; border-color: #ddd !important; }
+}

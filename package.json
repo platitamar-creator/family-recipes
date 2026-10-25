@@ -1,0 +1,11 @@
+{
+  "name": "family-recipes",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i ./css/input.css -o ./css/app.css --minify",
+    "watch:css": "tailwindcss -i ./css/input.css -o ./css/app.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.16"
+  }
+}
