@@ -72,7 +72,8 @@ function decodeEntities(s: string) {
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
     .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
+    .replace(/&nbsp;/g, " ").replace(/&ndash;/g, "–").replace(/&mdash;/g, "—").replace(/&rsquo;|&lsquo;/g, "'")
+    .replace(/&rdquo;|&ldquo;/g, '"').replace(/&amp;/g, "&");
 }
 
 function meta(html: string, name: string) {
@@ -356,6 +357,52 @@ function fromJsonLd(ld: Record<string, unknown>, tags: { id: string; name: strin
   };
 }
 
+// ---------- ליטוש ----------
+// אתרים רבים שמים את כל ההוראות בפסקה אחת, עם כיתובי תמונות ופרסומות. מסדרים לשלבים קצרים.
+
+const JUNK_STEP = /^(בתיאבון|בתאבון|תהנו|בהצלחה)|תייגו אותי|באינסטגרם|מצאתם טעות|ספרו לי איך/;
+
+function splitLong(step: string): string[] {
+  if (step.length <= 320) return [step];
+  const sentences = step.split(/(?<=[.!?])\s+|\s+(?=\d{1,2}\.\s)|\s+(?=(?:מכינים את|להגשה|הרכבה|טיפים?)[^.]{0,40}:)/)
+    .map((x) => x.replace(/^\d{1,2}\.\s*/, "").trim())
+    .filter(Boolean);
+  const out: string[] = [];
+  let cur = "";
+  for (const sentence of sentences) {
+    const heading = /^(מכינים את|להגשה|הרכבה|טיפים?)[^.]{0,40}:/.test(sentence);
+    if (cur && (heading || cur.length + sentence.length > 260)) {
+      out.push(cur);
+      cur = "";
+    }
+    cur = cur ? `${cur} ${sentence}` : sentence;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+function polish<T extends { title: string; description: string; steps: string[]; ingredients: { text: string; header?: boolean }[] }>(r: T): T {
+  const steps = r.steps
+    .map((x) => x.replace(/\[caption[^\]]*\][\s\S]*?\[\s*\/?\s*caption\]/g, " ").replace(/^אופן (ה)?הכנה:?\s*/, "").replace(/\s+/g, " ").trim())
+    .flatMap(splitLong)
+    .filter((x) => x && !(x.length < 120 && JUNK_STEP.test(x)));
+  // מצרכים שהודבקו יחד ("מגורר1 קישוא") מופרדים
+  const ingredients = r.ingredients.flatMap((i) => {
+    if (i.header || i.text.length < 60 || !/[א-ת)][:]?\d/.test(i.text)) return [i];
+    return i.text.replace(/([א-ת),])\s*(?=\d)/g, "$1\n").replace(/:\s*/g, ":\n").split("\n").map((t) => t.trim()).filter(Boolean)
+      .map((t) => (t.endsWith(":") && !/^\d/.test(t) ? { text: t.slice(0, -1), header: true } : { text: t.replace(/:$/, "") }));
+  });
+  // "שם | mako", "מתכון: שם", "שם - מתכון של ..." 
+  let title = r.title.replace(/\s*\|.*$/, "").replace(/^מתכון:\s*/, "").trim();
+  let description = r.description;
+  const m = title.match(/^(.{4,}?)\s+[-–]\s+((?:ה)?מתכון.*)$/);
+  if (m) {
+    title = m[1];
+    if (/ של /.test(m[2])) description = [m[2].replace(/^(ה)?מתכון/, "מתכון"), description].filter(Boolean).join(". ");
+  }
+  return { ...r, title: title.slice(0, 120), description, steps: steps.slice(0, 40), ingredients: ingredients.slice(0, 80) };
+}
+
 // ---------- הבקשה ----------
 
 Deno.serve(async (req) => {
@@ -444,7 +491,7 @@ Deno.serve(async (req) => {
 
   let model = "structured";
   let result: Record<string, unknown> = {};
-  let recipe = direct;
+  let recipe: NonNullable<typeof direct> = direct as NonNullable<typeof direct>;
   if (!recipe) {
     if (!apiKey) return json({ error: "ai_not_configured" }, 503);
     try {
@@ -455,6 +502,7 @@ Deno.serve(async (req) => {
     }
     recipe = tidy(result, tags);
   }
+  recipe = polish(recipe);
   const debug = body.debug ? { input: parts.map((p) => p.text ?? p.fileData?.fileUri).join("\n").slice(0, 3000), raw: result } : undefined;
   if (!recipe.is_recipe) return json({ error: "not_a_recipe", fetched, title: recipe.title, notes: recipe.notes, debug }, 422);
 
