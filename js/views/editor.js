@@ -1,5 +1,5 @@
 // הוספה ועריכה של מתכון (בני בית בלבד)
-import { rpc, deleteImages, thumbImg } from '../api.js';
+import { rpc, deleteImages, thumbImg, importRecipe } from '../api.js';
 import { SUPABASE_URL, SUPABASE_KEY } from '../config.js';
 import { uploadImages } from '../images.js';
 import { esc, loading, toast, showError, onAction, modal, busy, confirmDialog, avatar, $, $$, DIFFICULTY, TAG_COLORS } from '../ui.js';
@@ -99,6 +99,19 @@ export async function renderEditor(view, ctx, recipeId) {
       <span>📝 המשכנו מאיפה שעצרת. כל מה שהקלדת נשמר.</span>
       <button type="button" data-action="discard-draft" class="btn-ghost btn-sm shrink-0">להתחיל מחדש</button>
     </div>` : ''}
+
+    ${recipeId ? '' : `
+    <section class="card mb-5 border-2 border-dashed border-honey-300 p-5">
+      <h2 class="section-title mb-1">✨ יש לכם מתכון בקישור או בהודעה?</h2>
+      <p class="mb-3 text-sm text-cocoa-500">הדביקו קישור (אתר, אינסטגרם, יוטיוב) או את הטקסט של המתכון, למשל הודעה מוואטסאפ. ה-AI ימלא את הטופס, ואתם רק בודקים ושומרים.</p>
+      <textarea id="import-input" class="input min-h-[72px]" dir="auto" placeholder="https://... או הדביקו כאן טקסט של מתכון"></textarea>
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        <button type="button" data-action="import" class="btn-primary">✨ למלא לי את הטופס</button>
+        <span class="text-xs text-cocoa-500">לוקח בדרך כלל 10–30 שניות</span>
+      </div>
+    </section>`}
+    ${d.importNotes ? `<div class="mb-5 rounded-2xl bg-sage-100 px-4 py-3 text-sm text-sage-700">
+      ✨ מילאנו את הטופס מהמקור. כדאי לעבור ולבדוק לפני השמירה.<br><b>שימו לב:</b> ${esc(d.importNotes)}</div>` : ''}
 
     <form id="recipe-form" class="space-y-5">
       <section class="card space-y-4 p-5">
@@ -271,6 +284,39 @@ export async function renderEditor(view, ctx, recipeId) {
       tags: [...selectedTags],
       images,
       originalPaths,
+      importNotes: d.importNotes,
+    });
+  }
+
+  // ייבוא: ה-AI מחזיר טיוטה, שומרים אותה כטיוטה ופותחים את הטופס מחדש
+  async function runImport(button) {
+    const input = $('#import-input', app).value;
+    if (!input.trim()) return toast('הדביקו קודם קישור או טקסט 📋', 'error');
+    const filled = $('#f-title', app).value.trim() || $('#f-ingr', app).value.trim();
+    if (filled && !(await confirmDialog('למלא את הטופס מחדש? מה שכתבתם בשם ובמצרכים יוחלף.', { ok: 'כן, למלא', danger: false }))) return;
+    await busy(button, async () => {
+      const r = await importRecipe(ctx.token, input);
+      finished = true;
+      storeDraft(key, {
+        title: r.title,
+        description: r.description,
+        difficulty: r.difficulty || 2,
+        prep: r.prep_minutes ?? '',
+        cook: r.cook_minutes ?? '',
+        servings: r.servings ?? '',
+        servings_count: r.servings_count ?? '',
+        baseUpdatedAt: d.baseUpdatedAt,
+        source_url: r.source_url || $('#f-link', app).value,
+        ingredients: ingredientsToText(r.ingredients),
+        steps: r.steps.length ? r.steps : [''],
+        tags: [...new Set([...selectedTags, ...r.tag_ids])],
+        images: [...images, ...r.images].slice(0, MAX_IMAGES),
+        originalPaths,
+        importNotes: r.notes || '',
+      });
+      toast('הטופס מולא ✨ עברו ובדקו');
+      await renderEditor(view, ctx, recipeId);
+      window.scrollTo({ top: 0 });
     });
   }
   const _drawImages = drawImages;
@@ -337,6 +383,7 @@ export async function renderEditor(view, ctx, recipeId) {
       drawSteps();
     },
     'new-tag': () => openNewTag(),
+    import: (el) => runImport(el),
     'manage-tags': () => {
       saveDraft();
       try {

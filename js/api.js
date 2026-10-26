@@ -23,6 +23,9 @@ const MESSAGES = {
   ai_error: 'ה-AI לא הצליח לחשב הפעם. נסו שוב בעוד רגע 🤖',
   no_ingredients: 'כדי לחשב צריך קודם לכתוב מצרכים 🧺',
   bad_date: 'התאריך לא נראה הגיוני. אי אפשר לבשל בעתיד (עדיין) 🔮',
+  not_a_recipe: 'לא מצאנו שם מתכון 🤔 אם זה סרטון או פוסט, נסו להדביק את הטקסט שלו',
+  bad_url: 'הקישור לא נראה תקין 🔗',
+  nothing_to_import: 'צריך להדביק קישור או טקסט של מתכון 📋',
   default: 'אופס, משהו נשרף במטבח. נסו שוב בעוד רגע 🔥',
 };
 
@@ -129,6 +132,25 @@ export async function analyzeNutrition(key, recipeId) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(data.error || 'default');
   return data.nutrition;
+}
+
+// ייבוא מתכון מקישור או מטקסט: מחזיר טיוטה (לא שומר כלום)
+export async function importRecipe(key, input) {
+  const text = input.trim();
+  const isUrl = /^\S+$/.test(text) && /^(https?:\/\/|www\.)/i.test(text);
+  let res;
+  try {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/import`, {
+      method: 'POST',
+      headers: HEADERS,
+      body: JSON.stringify(isUrl ? { key, url: text } : { key, text }),
+    });
+  } catch {
+    throw new ApiError('network');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || 'default');
+  return data.recipe;
 }
 
 async function imagesFn(body) {
