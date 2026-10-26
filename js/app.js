@@ -7,6 +7,7 @@
 // #/h/<בית>/edit/<מתכון|new>
 // #/h/<בית>/tags         ניהול תגיות
 // #/h/<בית>/settings     שיתוף והגדרות
+// #/h/<בית>/timeline[/<מתכון>]  מה בישלנו (גם #/v/<קוד>/timeline)
 // #/v/<קוד צפייה>        צפייה בבית (קריאה בלבד)
 // #/v/<קוד צפייה>/r/<מתכון>
 // #/r/<קוד מתכון>        צפייה במתכון בודד
@@ -19,7 +20,9 @@ import { renderRecipe } from './views/recipe.js';
 import { renderEditor } from './views/editor.js';
 import { renderTags } from './views/tags.js';
 import { renderSettings } from './views/settings.js';
+import { renderTimeline } from './views/timeline.js';
 import { registerServiceWorker, handleInstallClick } from './install.js';
+import { mountSideDecor } from './decor.js';
 
 // הקשר הגישה: איזה קוד שולחים לשרת, ומה כתובת הבסיס לקישורים פנימיים
 function memberCtx(houseId) {
@@ -64,6 +67,7 @@ async function route() {
     if (kind === 'v' && a) {
       const ctx = { token: a, base: `#/v/${a}`, isMember: false };
       if (sub === 'r' && b) return await renderRecipe(view, ctx, b);
+      if (sub === 'timeline') return await renderTimeline(view, ctx, b || null);
       return await renderHouse(view, ctx);
     }
 
@@ -77,6 +81,7 @@ async function route() {
       if (sub === 'edit' && b) return await renderEditor(view, ctx, b === 'new' ? null : b);
       if (sub === 'tags') return await renderTags(view, ctx);
       if (sub === 'settings') return await renderSettings(view, ctx);
+      if (sub === 'timeline') return await renderTimeline(view, ctx, b || null);
       return await renderHouse(view, ctx);
     }
 
@@ -92,5 +97,6 @@ window.addEventListener('hashchange', route);
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-install]')) handleInstallClick();
 });
+mountSideDecor();
 route();
 registerServiceWorker();

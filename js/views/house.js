@@ -3,9 +3,28 @@ import { rpc, imageUrl } from '../api.js';
 import { saveHouse, getHouse } from '../store.js';
 import { esc, avatar, quoteCard, loading, difficultyIcons, totalTime, tagChip, $, $$ } from '../ui.js';
 import { topBar } from './common.js';
+import { panSVG } from '../decor.js';
+import { cookedAgo } from '../ui.js';
 
 // הסינון נשמר בזמן המעבר בין מסכים (לא בין פתיחות של האתר)
 const filterState = new Map();
+
+const SORTS = [
+  { id: 'new', name: 'עודכנו לאחרונה' },
+  { id: 'cooked', name: 'הכי מבושלים' },
+  { id: 'forgotten', name: 'לא בושלו מזמן' },
+  { id: 'loved', name: 'הכי אהובים' },
+  { id: 'abc', name: 'לפי א-ב' },
+];
+const avgScore = (r) => (r.ratings.length ? r.ratings.reduce((s, x) => s + x.score, 0) / r.ratings.length : 0);
+const SORTERS = {
+  new: (a, b) => (b.updated_at > a.updated_at ? 1 : -1),
+  cooked: (a, b) => (b.cook_count || 0) - (a.cook_count || 0) || (b.last_cooked || '').localeCompare(a.last_cooked || ''),
+  // מה שלא בושל אף פעם קודם, ואז מה שבושל הכי מזמן
+  forgotten: (a, b) => (a.last_cooked || '0000').localeCompare(b.last_cooked || '0000'),
+  loved: (a, b) => avgScore(b) - avgScore(a),
+  abc: (a, b) => a.title.localeCompare(b.title, 'he'),
+};
 const LOVED_SCORE = 8;
 
 const DIFF_BUCKETS = [
@@ -32,7 +51,7 @@ export async function renderHouse(view, ctx) {
   if (isMember && getHouse(house.id)) saveHouse(house.id, { name: house.name, emoji: house.emoji, member: me });
 
   const memberById = Object.fromEntries(members.map((m) => [m.id, m]));
-  const f = filterState.get(ctx.token) || { text: '', tags: new Set(), loved: new Set(), diff: new Set(), open: window.innerWidth >= 768 };
+  const f = filterState.get(ctx.token) || { text: '', tags: new Set(), loved: new Set(), diff: new Set(), sort: 'new', open: window.innerWidth >= 768 };
   filterState.set(ctx.token, f);
 
   const lovedBy = (r) => r.ratings.filter((x) => x.score >= LOVED_SCORE).map((x) => x.member_id);
@@ -44,25 +63,33 @@ export async function renderHouse(view, ctx) {
         : '<span class="chip bg-sage-100 text-sage-700">👀 מצב צפייה</span>',
     })}
 
-    <section class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div class="flex items-center gap-4">
-        <span class="flex h-20 w-20 items-center justify-center rounded-3xl bg-white text-5xl shadow-soft">${esc(house.emoji)}</span>
-        <div>
-          <h1 class="text-3xl leading-tight sm:text-4xl">${esc(house.name)}</h1>
-          <div class="mt-2 flex items-center">
+    <section class="hero mb-5 px-5 pb-9 pt-6 sm:px-8 animate-rise">
+      <div class="relative flex items-center gap-4">
+        <span class="relative flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-white text-5xl shadow-lift wiggle-hover">
+          <svg class="absolute -top-9 left-1/2 h-10 w-12 -translate-x-1/2" viewBox="-30 -46 60 50" aria-hidden="true">
+            <g class="steam" stroke="#FFFBF5" stroke-width="5" stroke-linecap="round" fill="none">
+              <path class="steam-1" d="M-14 0 C-22 -14 -6 -22 -14 -36"/><path class="steam-2" d="M0 -4 C-8 -18 8 -26 0 -42"/><path class="steam-3" d="M14 0 C6 -14 22 -22 14 -36"/>
+            </g>
+          </svg>
+          ${esc(house.emoji)}
+        </span>
+        <div class="min-w-0">
+          <p class="text-sm text-white/80">ספר המתכונים של</p>
+          <h1 class="text-3xl leading-tight text-white drop-shadow-sm sm:text-4xl text-wrap-any">${esc(house.name)}</h1>
+          <div class="mt-2 flex flex-wrap items-center gap-y-1">
             <div class="flex -space-x-2 space-x-reverse">${members.slice(0, 8).map((m) => avatar(m, 7)).join('')}</div>
-            <span class="mr-3 text-sm text-cocoa-500">${recipes.length} מתכונים · ${members.length} בני בית</span>
+            <span class="mr-3 text-sm text-white/90">${recipes.length} מתכונים · ${members.length} בני בית</span>
           </div>
         </div>
       </div>
-      <div class="sm:max-w-sm">${quoteCard(true)}</div>
     </section>
+    <div class="mb-6">${quoteCard(true)}</div>
 
-    ${isMember ? `
-      <div class="mb-5 flex flex-wrap gap-2">
-        <a href="${ctx.base}/edit/new" class="btn-primary">➕ מתכון חדש</a>
-        <a href="${ctx.base}/tags" class="btn-soft">🏷️ ניהול תגיות</a>
-      </div>` : ''}
+    <div class="mb-5 flex flex-wrap gap-2">
+      ${isMember ? `<a href="${ctx.base}/edit/new" class="btn-primary">➕ מתכון חדש</a>` : ''}
+      <a href="${ctx.base}/timeline" class="btn-sage">📅 מה בישלנו</a>
+      ${isMember ? `<a href="${ctx.base}/tags" class="btn-soft">🏷️ ניהול תגיות</a>` : ''}
+    </div>
 
     <section class="card mb-6 p-4">
       <div class="flex gap-2">
@@ -78,16 +105,16 @@ export async function renderHouse(view, ctx) {
         ${groups.filter((g) => g.tags.length).map((g) => `
           <div class="flex flex-wrap items-center gap-2">
             <span class="ml-1 w-full text-sm font-medium text-cocoa-500 sm:w-28">${esc(g.icon)} ${esc(g.name)}</span>
-            ${g.tags.map((t) => `<button class="chip-toggle" data-kind="tags" data-id="${esc(t.id)}">${esc(t.name)}</button>`).join('')}
+            ${g.tags.map((t) => `<button class="chip-toggle" aria-pressed="false" data-kind="tags" data-id="${esc(t.id)}">${esc(t.name)}</button>`).join('')}
           </div>`).join('')}
         ${members.length ? `
           <div class="flex flex-wrap items-center gap-2">
             <span class="ml-1 w-full text-sm font-medium text-cocoa-500 sm:w-28">❤️ אהוב על</span>
-            ${members.map((m) => `<button class="chip-toggle" data-kind="loved" data-id="${esc(m.id)}">${esc(m.name)}</button>`).join('')}
+            ${members.map((m) => `<button class="chip-toggle" aria-pressed="false" data-kind="loved" data-id="${esc(m.id)}">${esc(m.name)}</button>`).join('')}
           </div>` : ''}
         <div class="flex flex-wrap items-center gap-2">
           <span class="ml-1 w-full text-sm font-medium text-cocoa-500 sm:w-28">🥄 רמת קושי</span>
-          ${DIFF_BUCKETS.map((d) => `<button class="chip-toggle" data-kind="diff" data-id="${d.id}">${d.name}</button>`).join('')}
+          ${DIFF_BUCKETS.map((d) => `<button class="chip-toggle" aria-pressed="false" data-kind="diff" data-id="${d.id}">${d.name}</button>`).join('')}
         </div>
         <div class="flex justify-end">
           <button id="clear" class="btn-ghost btn-sm">ניקוי הסינון ✖</button>
@@ -95,7 +122,14 @@ export async function renderHouse(view, ctx) {
       </div>
     </section>
 
-    <p id="result-line" class="mb-3 text-sm text-cocoa-500"></p>
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <p id="result-line" class="text-sm text-cocoa-500"></p>
+      <label class="flex items-center gap-2 text-sm text-cocoa-500">מיון:
+        <select id="sort" class="rounded-xl border-2 border-cream-200 bg-white px-2 py-1 text-cocoa-700 focus:border-spice-300 focus:outline-none">
+          ${SORTS.map((x) => `<option value="${x.id}" ${f.sort === x.id ? 'selected' : ''}>${x.name}</option>`).join('')}
+        </select>
+      </label>
+    </div>
     <section id="grid" class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3"></section>`);
 
   const recipeHref = (r) => `${ctx.base}/r/${r.id}`;
@@ -116,12 +150,13 @@ export async function renderHouse(view, ctx) {
              <span class="flex -space-x-1.5 space-x-reverse">${loved.slice(0, 4).map((m) => avatar(m, 6)).join('')}</span></div>` : ''}
         </div>
         <div class="flex flex-1 flex-col gap-2 p-4">
-          <h3 class="text-xl leading-snug">${esc(r.title)}${r.has_link ? ' <span class="text-base" title="יש קישור למתכון באינטרנט">🌐</span>' : ''}</h3>
+          <h3 class="text-xl leading-snug text-wrap-any">${esc(r.title)}${r.has_link ? ' <span class="text-base" title="יש קישור למתכון באינטרנט">🌐</span>' : ''}</h3>
           ${r.description ? `<p class="line-clamp-2 text-sm text-cocoa-500">${esc(r.description)}</p>` : ''}
           <div class="mt-auto flex items-center justify-between pt-1 text-sm text-cocoa-500">
             ${difficultyIcons(r.difficulty, 'text-sm')}
             ${time ? `<span>⏱️ ${time}</span>` : ''}
           </div>
+          ${r.cook_count ? `<p class="text-xs text-sage-700">👩‍🍳 בושל ${r.cook_count === 1 ? 'פעם אחת' : `${r.cook_count} פעמים`} · לאחרונה ${cookedAgo(r.last_cooked)}</p>` : ''}
           ${tags.length ? `<div class="flex flex-wrap gap-1">${tags.slice(0, 4).map((t) => tagChip(t, 'text-xs px-2 py-0.5')).join('')}</div>` : ''}
         </div>
       </a>`;
@@ -135,7 +170,8 @@ export async function renderHouse(view, ctx) {
   function matches(r) {
     const q = f.text.trim().toLowerCase();
     if (q) {
-      const hay = [r.title, r.description, ...(r.ingredients || [])].join(' ').toLowerCase();
+      const tagNames = r.tag_ids.map((id) => tagById[id]?.name || '');
+      const hay = [r.title, r.description, ...(r.ingredients || []), ...tagNames].join(' ').toLowerCase();
       if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
     }
     // בתוך קבוצה: "או". בין קבוצות: "וגם".
@@ -153,13 +189,17 @@ export async function renderHouse(view, ctx) {
   function update() {
     // ניקוי תגיות שנמחקו
     [...f.tags].forEach((id) => !tagById[id] && f.tags.delete(id));
-    $$('[data-kind]', view.app).forEach((b) => b.classList.toggle('is-on', f[b.dataset.kind].has(b.dataset.id)));
+    $$('[data-kind]', view.app).forEach((b) => {
+      const on = f[b.dataset.kind].has(b.dataset.id);
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
     const count = f.tags.size + f.loved.size + f.diff.size;
     const badge = $('#filter-count', view.app);
     badge.textContent = count;
     badge.classList.toggle('hidden', !count);
 
-    const list = recipes.filter(matches);
+    const list = recipes.filter(matches).sort(SORTERS[f.sort] || SORTERS.new);
     const grid = $('#grid', view.app);
     const line = $('#result-line', view.app);
     const filtering = count || f.text.trim();
@@ -167,7 +207,7 @@ export async function renderHouse(view, ctx) {
 
     if (!recipes.length) {
       grid.innerHTML = `<div class="col-span-full card p-10 text-center">
-        <div class="mb-3 text-6xl">🍳</div>
+        <div class="mx-auto w-fit">${panSVG('h-32 w-32')}</div>
         <h2 class="mb-2 text-2xl">אין מתכונים עדיין...</h2>
         <p class="mb-5 text-cocoa-500">מישהו פה בכלל מבשל? 😄 זה הזמן להעלות את המתכון הראשון!</p>
         ${isMember ? `<a href="${ctx.base}/edit/new" class="btn-primary">➕ המתכון הראשון</a>` : ''}
@@ -192,6 +232,10 @@ export async function renderHouse(view, ctx) {
     if (!b) return;
     const set = f[b.dataset.kind];
     set.has(b.dataset.id) ? set.delete(b.dataset.id) : set.add(b.dataset.id);
+    update();
+  });
+  $('#sort', view.app).addEventListener('change', (e) => {
+    f.sort = e.target.value;
     update();
   });
   $('#toggle-filters', view.app).addEventListener('click', () => {

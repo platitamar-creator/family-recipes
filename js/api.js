@@ -14,6 +14,8 @@ const MESSAGES = {
   name_required: 'נראה ששכחת למלא משהו חשוב 🙃',
   recipe_only: 'הקישור הזה פותח רק מתכון אחד 📄',
   network: 'אין חיבור לאינטרנט. המטבח מחכה לך 📡',
+  needs_update: 'התכונה הזו עוד לא הופעלה במסד הנתונים. צריך להריץ את העדכון האחרון ב-Supabase 🛠️',
+  bad_date: 'התאריך לא נראה הגיוני. אי אפשר לבשל בעתיד (עדיין) 🔮',
   default: 'אופס, משהו נשרף במטבח. נסו שוב בעוד רגע 🔥',
 };
 
@@ -25,6 +27,8 @@ export class ApiError extends Error {
 }
 
 function codeFrom(text) {
+  // פונקציה שעוד לא קיימת במסד הנתונים (עדכון שלא הורץ)
+  if (text.includes('PGRST202') || text.includes('Could not find the function')) return 'needs_update';
   return Object.keys(MESSAGES).find((c) => text.includes(c)) || 'default';
 }
 

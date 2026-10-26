@@ -1,5 +1,6 @@
 // כלים קטנים לממשק: הגנה על טקסט, הודעות קופצות, חלונות, תאריכים ותצוגות קטנות.
 import { quoteOfTheDay } from './quotes.js';
+import { potSVG, panSVG } from './decor.js';
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -46,7 +47,8 @@ export function modal(innerHtml, { wide = false, onClose } = {}) {
   });
   document.addEventListener('keydown', onKey);
   document.body.appendChild(wrap);
-  wrap.querySelector('input, textarea, select')?.focus();
+  // בטלפון לא מקפיצים מקלדת אוטומטית; במחשב מתמקדים בשדה הראשון
+  if (window.matchMedia('(pointer: fine)').matches) wrap.querySelector('input:not([type=date]), textarea, select')?.focus();
   return { el: wrap, close };
 }
 
@@ -96,6 +98,21 @@ export function timeAgo(iso) {
     if (Math.abs(sec) >= s) return rtf.format(Math.round(sec / s), unit);
   }
   return 'הרגע';
+}
+
+// "היום", "אתמול", "לפני 3 ימים"
+export function cookedAgo(day) {
+  if (!day) return '';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(`${day}T00:00:00`);
+  const diff = Math.round((today - d) / 86400000);
+  if (diff <= 0) return 'היום';
+  if (diff === 1) return 'אתמול';
+  if (diff < 7) return `לפני ${diff} ימים`;
+  if (diff < 30) return `לפני ${Math.round(diff / 7) === 1 ? 'שבוע' : `${Math.round(diff / 7)} שבועות`}`;
+  if (diff < 365) return `לפני ${Math.round(diff / 30) === 1 ? 'חודש' : `${Math.round(diff / 30)} חודשים`}`;
+  return `לפני ${Math.round(diff / 365) === 1 ? 'שנה' : `${Math.round(diff / 365)} שנים`}`;
 }
 
 export const formatDate = (iso) =>
@@ -157,12 +174,12 @@ export function quoteCard(compact = false) {
 
 export function loading(text = 'מערבבים את הסיר...') {
   return `<div class="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-cocoa-500">
-    <span class="animate-bounce text-5xl">🍲</span><p>${esc(text)}</p></div>`;
+    ${potSVG('h-28 w-28')}<p class="font-hand text-3xl text-cocoa-700">${esc(text)}</p></div>`;
 }
 
 export function errorPage(err, { homeLink = true } = {}) {
   return `<div class="card mx-auto mt-10 max-w-md p-8 text-center animate-rise">
-    <div class="mb-3 text-6xl">🥲</div>
+    <div class="mx-auto mb-2 w-fit">${panSVG('h-28 w-28')}</div>
     <h1 class="mb-2 text-2xl">אוי, משהו לא הסתדר</h1>
     <p class="mb-6 text-cocoa-700">${esc(err?.message || 'שגיאה לא צפויה')}</p>
     ${homeLink ? '<a href="#/" class="btn-primary">חזרה לדף הבית 🏠</a>' : ''}

@@ -4,9 +4,10 @@ import { rpc, imageUrl, deleteImages } from '../api.js';
 import { getChecks, setChecks, getGuestName, setGuestName } from '../store.js';
 import {
   esc, multiline, avatar, loading, difficultyIcons, tagChip, totalTime, timeAgo, formatDate,
-  modal, confirmDialog, copyText, whatsappUrl, onAction, busy, toast, $, DIFFICULTY,
+  modal, confirmDialog, copyText, whatsappUrl, onAction, busy, toast, cookedAgo, $, DIFFICULTY,
 } from '../ui.js';
 import { topBar, shareLinks } from './common.js';
+import { confetti } from '../decor.js';
 
 // מצב הממשק נשמר בין רענונים של אותו מתכון
 const ui = { shopMode: false, doneSteps: new Set(), recipeId: null };
@@ -21,6 +22,9 @@ const hostOf = (u) => {
   }
 };
 
+const formatDay = (day) =>
+  new Date(`${day}T00:00:00`).toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+
 const FACES = (s) => (s >= 10 ? '🤩' : s >= 8 ? '😋' : s >= 6 ? '🙂' : s >= 4 ? '😐' : '😖');
 
 // cached: נתונים שכבר נטענו, לשינויי תצוגה מקומיים (סימון שלב, רשימת קניות) בלי לפנות לשרת
@@ -30,6 +34,7 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
   if (!view.isCurrent()) return;
 
   const { recipe: r, house, members, role, me, variations, ratings, comments } = data;
+  const cooks = data.cooks || [];
   const isMember = role === 'member';
   if (ui.recipeId !== r.id) {
     ui.recipeId = r.id;
@@ -85,7 +90,14 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
         ${r.created_by ? `נוסף ע״י ${esc(r.created_by.name)} · ` : ''}${formatDate(r.created_at)}
         ${r.updated_by && r.updated_at !== r.created_at ? ` · עודכן ${timeAgo(r.updated_at)} ע״י ${esc(r.updated_by.name)}` : ''}
       </p>
-      <div class="mt-4 flex flex-wrap gap-2">
+      ${isMember || cooks.length ? `
+        <div class="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-sage-100 p-3 no-print">
+          ${isMember ? '<button data-action="cooked" class="btn-sage wiggle-hover">👩‍🍳 הכנתי!</button>' : ''}
+          <span class="text-sm text-sage-700">${cooks.length
+            ? `בושל ${cooks.length === 1 ? 'פעם אחת' : `${cooks.length} פעמים`} · לאחרונה ${cookedAgo(cooks[0].cooked_on)}`
+            : 'עוד לא סימנו שמישהו הכין את זה. מי ראשון? 🏁'}</span>
+        </div>` : ''}
+      <div class="mt-4 flex flex-wrap gap-2 no-print">
         ${isMember ? `<a href="${ctx.base}/edit/${r.id}" class="btn-soft btn-sm">✏️ עריכה</a>` : ''}
         <button data-action="share" class="btn-soft btn-sm">🔗 שיתוף המתכון</button>
         <button data-action="print" class="btn-soft btn-sm">🖨️ הדפסה</button>
@@ -97,7 +109,7 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
     <section class="card p-5 lg:sticky lg:top-4">
       <div class="mb-3 flex items-center justify-between gap-2">
         <h2 class="section-title">🧺 מצרכים</h2>
-        ${realItems.length ? `<button data-action="shop-mode" class="${ui.shopMode ? 'btn-sage' : 'btn-soft'} btn-sm">
+        ${realItems.length ? `<button data-action="shop-mode" class="${ui.shopMode ? 'btn-sage' : 'btn-soft'} btn-sm no-print">
           ${ui.shopMode ? '✓ סיימתי לבדוק' : '🛒 מה חסר בבית?'}</button>` : ''}
       </div>
       ${ui.shopMode ? `<p class="mb-3 rounded-2xl bg-sage-50 p-3 text-sm text-sage-700">סמנו את מה שכבר יש בבית. מה שלא מסומן ייכנס לרשימת הקניות 🛍️</p>` : ''}
@@ -112,7 +124,7 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
         ).join('')}
       </ul>` : '<p class="text-cocoa-500">עוד לא נכתבו מצרכים 🤷</p>'}
       ${ui.shopMode ? `
-        <div class="mt-4 border-t-2 border-dashed border-cream-200 pt-4">
+        <div class="mt-4 border-t-2 border-dashed border-cream-200 pt-4 no-print">
           <p class="mb-3 text-center text-sm font-medium ${missing.length ? 'text-spice-700' : 'text-sage-700'}">
             ${missing.length ? `חסרים ${missing.length} מתוך ${realItems.length} מצרכים` : 'יש הכול! אפשר להתחיל לבשל 🎉'}</p>
           <div class="flex gap-2">
@@ -132,7 +144,7 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
             <span class="pt-1 leading-relaxed ${ui.doneSteps.has(i) ? 'line-through' : ''}">${multiline(s.text)}</span>
           </button></li>`).join('')}
       </ol>
-      <p class="mt-3 text-center text-xs text-cocoa-500">טיפ: לחיצה על שלב מסמנת אותו כגמור ✓</p>` : '<p class="text-cocoa-500">עוד לא נכתבו שלבים. אולי זה מתכון "בעין"? 👀</p>'}
+      <p class="mt-3 text-center text-xs text-cocoa-500 no-print">טיפ: לחיצה על שלב מסמנת אותו כגמור ✓</p>` : '<p class="text-cocoa-500">עוד לא נכתבו שלבים. אולי זה מתכון "בעין"? 👀</p>'}
     </section>`;
 
   // ----- דירוגי בני הבית: אזור בולט ונפרד -----
@@ -166,7 +178,7 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
       </div>` : '<p class="rounded-2xl bg-white/60 p-4 text-center text-sage-700">עוד אף אחד לא דירג. מי יהיה הראשון? 🏆</p>'}
       ${notRated.length ? `<p class="mt-3 text-xs text-sage-700">עוד לא דירגו: ${notRated.map((m) => esc(m.name)).join(', ')}</p>` : ''}
       ${isMember ? `
-        <div class="mt-4 rounded-2xl bg-white p-4">
+        <div class="mt-4 rounded-2xl bg-white p-4 no-print">
           <p class="mb-2 font-medium">${myRating ? 'הדירוג שלך' : 'ומה את/ה אומר/ת?'} ${avatar(me, 6)}</p>
           <div class="mb-3 grid grid-cols-5 gap-1.5 sm:grid-cols-10" id="score-pick">
             ${Array.from({ length: 10 }, (_, i) => i + 1).map((n) => `
@@ -240,6 +252,32 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
       </div>
     </section>`;
 
+  // ----- היסטוריית הכנות -----
+  const cooksSection = cooks.length ? `
+    <section class="mb-8">
+      <div class="mb-3 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 class="section-title text-2xl">🍳 היסטוריית הכנות</h2>
+          <p class="text-sm text-cocoa-500">מתי הכינו את זה בבית, ומי.</p>
+        </div>
+        ${ctx.base ? `<a href="${ctx.base}/timeline/${r.id}" class="btn-soft btn-sm no-print">📅 בציר הזמן</a>` : ''}
+      </div>
+      <ol class="card relative space-y-0 p-4 sm:p-5">
+        ${cooks.slice(0, 12).map((k, i) => `
+          <li class="relative flex items-start gap-3 pb-4 last:pb-0">
+            ${i < Math.min(cooks.length, 12) - 1 ? '<span class="absolute right-[13px] top-7 h-full w-0.5 bg-sage-200"></span>' : ''}
+            <span class="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sage-500 text-xs text-white">✓</span>
+            <div class="min-w-0 flex-1">
+              <p class="flex flex-wrap items-center gap-2"><b>${esc(formatDay(k.cooked_on))}</b>
+                ${memberById[k.member_id] ? `<span class="flex items-center gap-1 text-sm text-cocoa-500">${avatar(memberById[k.member_id], 6)} ${esc(memberById[k.member_id].name)}</span>` : ''}</p>
+              ${k.note ? `<p class="text-sm text-cocoa-700 text-wrap-any">${esc(k.note)}</p>` : ''}
+            </div>
+            ${isMember ? `<button data-action="del-cook" data-id="${esc(k.id)}" class="text-cocoa-300 hover:text-berry-500 no-print" title="מחיקה">✕</button>` : ''}
+          </li>`).join('')}
+      </ol>
+      ${cooks.length > 12 ? `<p class="mt-2 text-center text-xs text-cocoa-500">ועוד ${cooks.length - 12} פעמים קודמות</p>` : ''}
+    </section>` : '';
+
   view.mount(`
     <div data-recipe-page>
       ${topBar(ctx.base
@@ -252,11 +290,58 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
         ${steps}
       </div>
       ${membersSection}
+      ${cooksSection}
       ${variationsSection}
       ${logSection}
     </div>`);
 
   // ---------- פעולות ----------
+
+  // "הכנתי!": מתי, מי, ומילה על איך יצא
+  function openCooked(fromBtn) {
+    const today = new Date().toLocaleDateString('en-CA');
+    let who = me?.id;
+    const { el, close } = modal(`
+      <div class="mb-4 text-center">
+        <div class="mx-auto w-fit">${'<span class="text-5xl">👩‍🍳</span>'}</div>
+        <h2 class="text-2xl">כל הכבוד! מה הכנתם?</h2>
+        <p class="text-sm text-cocoa-500">${esc(r.title)}</p>
+      </div>
+      <form class="space-y-4">
+        <div><label class="label" for="c-date">מתי?</label>
+          <input id="c-date" name="date" type="date" class="input" value="${today}" max="${today}" required></div>
+        <div><span class="label">מי בישל?</span>
+          <div class="flex flex-wrap gap-2" data-who>
+            ${members.map((m) => `<button type="button" data-member="${esc(m.id)}" aria-pressed="${m.id === who}" class="chip-toggle ${m.id === who ? 'is-on' : ''}">${esc(m.name)}</button>`).join('')}
+          </div></div>
+        <div><label class="label" for="c-note">איך יצא? (לא חובה)</label>
+          <input id="c-note" name="note" class="input" maxlength="300" placeholder="למשל: עם יותר שום, ונגמר תוך 5 דקות 😄"></div>
+        <div class="flex gap-2 pt-1">
+          <button class="btn-sage flex-1" type="submit">שמירה 🎉</button>
+          <button class="btn-soft" type="button" data-close>ביטול</button>
+        </div>
+      </form>`);
+    el.querySelector('[data-who]').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-member]');
+      if (!b) return;
+      who = b.dataset.member;
+      el.querySelectorAll('[data-member]').forEach((x) => {
+        x.classList.toggle('is-on', x === b);
+        x.setAttribute('aria-pressed', String(x === b));
+      });
+    });
+    el.querySelector('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      busy(e.target.querySelector('[type=submit]'), async () => {
+        await rpc('log_cook', { p_token: ctx.token, p_recipe_id: r.id, p_cooked_on: fd.get('date'), p_member_id: who, p_note: fd.get('note') });
+        close();
+        confetti(fromBtn?.isConnected ? fromBtn : null);
+        toast('בתיאבון! נרשם בהיסטוריה 🍽️');
+        await reload();
+      });
+    });
+  }
 
   const app = view.app;
   let pickedScore = myRating?.score || null;
@@ -283,6 +368,14 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
   );
 
   onAction(app, {
+    cooked: (el) => openCooked(el),
+    'del-cook': async (el) => {
+      if (!(await confirmDialog('למחוק את ההכנה הזו מההיסטוריה?'))) return;
+      busy(null, async () => {
+        await rpc('delete_cook', { p_token: ctx.token, p_id: el.dataset.id });
+        await reload();
+      });
+    },
     'shop-mode': () => {
       ui.shopMode = !ui.shopMode;
       reload(true);
@@ -414,5 +507,17 @@ function openLightbox(images, start) {
   };
   el.querySelector('[data-prev]')?.addEventListener('click', () => { i = (i - 1 + images.length) % images.length; show(); });
   el.querySelector('[data-next]')?.addEventListener('click', () => { i = (i + 1) % images.length; show(); });
+  // החלקה בין תמונות בטלפון (בעברית: החלקה ימינה = הבאה)
+  let startX = null;
+  const img = el.querySelector('[data-img]');
+  img.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; }, { passive: true });
+  img.addEventListener('touchend', (e) => {
+    if (startX === null || images.length < 2) return;
+    const dx = e.changedTouches[0].clientX - startX;
+    startX = null;
+    if (Math.abs(dx) < 40) return;
+    i = dx > 0 ? (i + 1) % images.length : (i - 1 + images.length) % images.length;
+    show();
+  });
   show();
 }

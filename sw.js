@@ -2,14 +2,14 @@
 // קבצי האתר: קודם רשת (כדי לקבל תמיד את הגרסה העדכנית), ואם אין רשת – מהמטמון.
 // תמונות מתכונים: מהמטמון (הכתובת של כל תמונה ייחודית ולא משתנה).
 // נתונים מ-Supabase לא נשמרים במטמון.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL = `shell-${VERSION}`;
 const IMAGES = 'recipe-images';
 const SHELL_FILES = [
-  './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon-192.png',
-  'js/app.js', 'js/api.js', 'js/config.js', 'js/images.js', 'js/quotes.js', 'js/store.js', 'js/ui.js', 'js/install.js',
+  './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon-192.png', 'img/doodles.svg',
+  'js/app.js', 'js/api.js', 'js/config.js', 'js/images.js', 'js/quotes.js', 'js/store.js', 'js/ui.js', 'js/install.js', 'js/decor.js',
   'js/views/common.js', 'js/views/editor.js', 'js/views/home.js', 'js/views/house.js', 'js/views/join.js',
-  'js/views/recipe.js', 'js/views/settings.js', 'js/views/tags.js',
+  'js/views/recipe.js', 'js/views/settings.js', 'js/views/tags.js', 'js/views/timeline.js',
 ];
 
 self.addEventListener('install', (e) => {
