@@ -1,14 +1,16 @@
 // שיתוף והגדרות: קישורי צפייה והצטרפות, שם הבית, הפרופיל שלי
-import { rpc } from '../api.js';
+import { rpc, deleteImages, thumbImg } from '../api.js';
 import { saveHouse, removeHouse } from '../store.js';
-import { esc, loading, avatar, copyText, whatsappUrl, confirmDialog, onAction, busy, toast, $, EMOJIS, COLORS } from '../ui.js';
+import { esc, loading, avatar, copyText, whatsappUrl, confirmDialog, onAction, busy, toast, timeAgo, $, EMOJIS, COLORS } from '../ui.js';
 import { topBar, shareLinks } from './common.js';
 
 export async function renderSettings(view, ctx) {
   if (!view.app.querySelector('[data-settings-page]')) view.app.innerHTML = loading();
   const data = await rpc('get_house', { p_token: ctx.token });
   if (!view.isCurrent()) return;
-  const { house, me, members } = data;
+  const { house, me } = data;
+  const active = data.members.filter((m) => !m.archived);
+  const archived = data.members.filter((m) => m.archived);
   const reload = () => renderSettings(view, ctx);
 
   const viewLink = shareLinks.house(house.view_token);
@@ -60,10 +62,34 @@ export async function renderSettings(view, ctx) {
         </div>
         <button class="btn-primary btn-sm" type="submit">שמירה</button>
       </form>
-      <div class="mt-5 border-t border-cream-200 pt-4">
-        <p class="mb-2 text-sm font-medium text-cocoa-700">בני הבית (${members.length})</p>
-        <div class="flex flex-wrap gap-2">${members.map((m) => `<span class="flex items-center gap-1.5 rounded-full bg-cream-100 py-1 pl-3 pr-1 text-sm">${avatar(m, 6)} ${esc(m.name)}</span>`).join('')}</div>
-      </div>
+    </section>
+
+    <section class="card mb-4 p-5">
+      <h2 class="section-title mb-1">👨‍👩‍👧 בני הבית (${active.length})</h2>
+      <p class="mb-3 text-sm text-cocoa-500">העברה לארכיון מנתקת את המכשירים של בן הבית ומסירה אותו מהרשימות. כל מה שהוא כתב, דירג ובישל נשאר.</p>
+      <ul class="divide-y divide-cream-200">
+        ${active.map((m) => `
+          <li class="flex flex-wrap items-center gap-2 py-2">
+            ${avatar(m, 9)} <span class="flex-1 font-medium">${esc(m.name)}${m.id === me.id ? ' <span class="text-xs text-cocoa-500">(זה את/ה)</span>' : ''}</span>
+            <button data-action="revoke" data-id="${esc(m.id)}" data-name="${esc(m.name)}" class="btn-ghost btn-sm" title="למשל אם טלפון אבד">📵 ניתוק מכשירים</button>
+            ${m.id !== me.id ? `<button data-action="archive" data-id="${esc(m.id)}" data-name="${esc(m.name)}" class="btn-ghost btn-sm text-berry-600">📦 לארכיון</button>` : ''}
+          </li>`).join('')}
+      </ul>
+      ${archived.length ? `
+        <details class="mt-3 rounded-2xl bg-cream-50 p-3">
+          <summary class="cursor-pointer text-sm font-medium text-cocoa-700">בארכיון (${archived.length})</summary>
+          <ul class="mt-2 divide-y divide-cream-200">
+            ${archived.map((m) => `
+              <li class="flex items-center gap-2 py-2 opacity-80">${avatar(m, 7)} <span class="flex-1">${esc(m.name)}</span>
+                <button data-action="restore-member" data-id="${esc(m.id)}" class="btn-soft btn-sm">↩️ החזרה</button></li>`).join('')}
+          </ul>
+        </details>` : ''}
+    </section>
+
+    <section class="card mb-4 p-5">
+      <h2 class="section-title mb-1">🗑️ סל המיחזור</h2>
+      <p class="mb-3 text-sm text-cocoa-500">מתכונים שנמחקו נשמרים כאן 30 יום, עם כל ההיסטוריה שלהם, ואז נמחקים סופית.</p>
+      <div id="trash">${data.trash_count ? '<p class="text-sm text-cocoa-500">טוען...</p>' : '<p class="text-sm text-cocoa-500">הסל ריק 🎉</p>'}</div>
     </section>
 
     <section class="card mb-4 p-5">
@@ -122,7 +148,60 @@ export async function renderSettings(view, ctx) {
     });
   });
 
+  // סל המיחזור: נטען בנפרד (וגם מנקה מתכונים ישנים מ-30 יום)
+  if (data.trash_count) {
+    rpc('get_trash', { p_token: ctx.token }).then((t) => {
+      deleteImages(ctx.token, t.purged_paths || []);
+      const box = $('#trash', app);
+      if (!box) return;
+      box.innerHTML = t.items.length ? `<ul class="divide-y divide-cream-200">${t.items.map((x) => {
+        const daysLeft = Math.max(0, 30 - Math.floor((Date.now() - new Date(x.deleted_at)) / 86400000));
+        return `<li class="flex items-center gap-3 py-2">
+          ${x.cover ? thumbImg(x.cover, 'h-11 w-11 shrink-0 rounded-xl object-cover') : '<span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cream-200">🍲</span>'}
+          <div class="min-w-0 flex-1">
+            <p class="truncate font-medium">${esc(x.title)}</p>
+            <p class="text-xs text-cocoa-500">נמחק ${timeAgo(x.deleted_at)}${x.deleted_by ? ` ע״י ${esc(x.deleted_by.name)}` : ''} · עוד ${daysLeft} ימים</p>
+          </div>
+          <button data-action="restore-recipe" data-id="${esc(x.id)}" class="btn-soft btn-sm shrink-0">↩️ שחזור</button>
+        </li>`;
+      }).join('')}</ul>` : '<p class="text-sm text-cocoa-500">הסל ריק 🎉</p>';
+    }).catch(() => {});
+  }
+
   onAction(app, {
+    archive: async (el) => {
+      if (!(await confirmDialog(`להעביר את ${esc(el.dataset.name)} לארכיון?<br><span class="text-sm text-cocoa-500">המכשירים שלו/ה יתנתקו. כל הדירוגים, ההערות וההכנות נשארים, ואפשר להחזיר בכל רגע.</span>`, { ok: 'להעביר לארכיון' }))) return;
+      busy(el, async () => {
+        await rpc('archive_member', { p_token: ctx.token, p_member_id: el.dataset.id });
+        toast('הועבר לארכיון 📦');
+        reload();
+      });
+    },
+    'restore-member': (el) =>
+      busy(el, async () => {
+        await rpc('restore_member', { p_token: ctx.token, p_member_id: el.dataset.id });
+        toast('חזר לבית 🏡 (צריך להתחבר שוב מקישור ההצטרפות)');
+        reload();
+      }),
+    revoke: async (el) => {
+      const self = el.dataset.id === me.id;
+      if (!(await confirmDialog(`לנתק את כל המכשירים של ${esc(el.dataset.name)}?<br><span class="text-sm text-cocoa-500">${self ? 'גם המכשיר הזה יתנתק. ' : ''}כדי להיכנס שוב, פותחים את קישור ההצטרפות ובוחרים את השם. שום מידע לא נמחק.</span>`, { ok: 'לנתק' }))) return;
+      busy(el, async () => {
+        const n = await rpc('revoke_member_devices', { p_token: ctx.token, p_member_id: el.dataset.id });
+        if (self) {
+          removeHouse(ctx.houseId);
+          location.hash = '#/';
+          return;
+        }
+        toast(`נותקו ${n} מכשירים 📵`);
+      });
+    },
+    'restore-recipe': (el) =>
+      busy(el, async () => {
+        await rpc('restore_recipe', { p_token: ctx.token, p_recipe_id: el.dataset.id });
+        toast('המתכון חזר ✓');
+        location.hash = `${ctx.base}/r/${el.dataset.id}`;
+      }),
     copy: (el) => copyText(el.dataset.link),
     rotate: async (el) => {
       const what = el.dataset.kind === 'member' ? 'ההצטרפות' : 'הצפייה';

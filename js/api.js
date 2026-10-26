@@ -15,6 +15,12 @@ const MESSAGES = {
   recipe_only: 'הקישור הזה פותח רק מתכון אחד 📄',
   network: 'אין חיבור לאינטרנט. המטבח מחכה לך 📡',
   needs_update: 'התכונה הזו עוד לא הופעלה במסד הנתונים. צריך להריץ את העדכון האחרון ב-Supabase 🛠️',
+  edit_conflict: 'מישהו אחר שמר שינויים במתכון בזמן שערכת ✋',
+  cannot_self: 'אי אפשר להעביר את עצמך לארכיון. בן בית אחר יכול לעשות את זה 🙂',
+  ai_limit: 'הגעתם למגבלה היומית של חישובי AI בבית. נסו שוב מחר 🌙',
+  ai_not_configured: 'חישוב הערכים עוד לא הופעל: צריך להוסיף מפתח Gemini ב-Supabase 🔑',
+  ai_error: 'ה-AI לא הצליח לחשב הפעם. נסו שוב בעוד רגע 🤖',
+  no_ingredients: 'כדי לחשב צריך קודם לכתוב מצרכים 🧺',
   bad_date: 'התאריך לא נראה הגיוני. אי אפשר לבשל בעתיד (עדיין) 🔮',
   default: 'אופס, משהו נשרף במטבח. נסו שוב בעוד רגע 🔥',
 };
@@ -48,6 +54,82 @@ export async function rpc(fn, args = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+// ---------- זיכרון מקומי: מסכים נפתחים מיד, ומתעדכנים ברקע ----------
+// הנתונים האחרונים של כל מסך נשמרים במכשיר. בפתיחה מציגים אותם מיד (גם בלי רשת),
+// ובמקביל מביאים גרסה טרייה; אם משהו השתנה, המסך מתרענן.
+const CACHE_PREFIX = 'frb.cache.';
+const cacheKey = (fn, args) => CACHE_PREFIX + fn + ':' + JSON.stringify(args);
+
+function cacheRead(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function cacheWrite(key, text) {
+  try {
+    localStorage.setItem(key, text);
+  } catch {
+    // אין מקום: מנקים את הזיכרון המקומי של המסכים ומנסים שוב פעם אחת
+    try {
+      Object.keys(localStorage).filter((k) => k.startsWith(CACHE_PREFIX)).forEach((k) => localStorage.removeItem(k));
+      localStorage.setItem(key, text);
+    } catch {
+      /* מוותרים */
+    }
+  }
+}
+
+export function forgetCache(fn, args) {
+  try {
+    localStorage.removeItem(cacheKey(fn, args));
+  } catch {
+    /* כלום */
+  }
+}
+
+// מחזיר נתונים מהר ככל האפשר. onFresh נקרא אם הגיעה גרסה חדשה ושונה אחרי שהוחזרה גרסה שמורה.
+export async function rpcCached(fn, args, onFresh) {
+  const key = cacheKey(fn, args);
+  const cached = cacheRead(key);
+  const fresh = rpc(fn, args).then((data) => {
+    const text = JSON.stringify(data);
+    cacheWrite(key, text);
+    return { data, text };
+  });
+  if (!cached) return (await fresh).data;
+  fresh
+    .then(({ data, text }) => {
+      if (text !== cached) onFresh?.(data);
+    })
+    .catch((err) => {
+      // הקישור כבר לא תקף (למשל מכשיר שנותק): מוחקים את הגרסה השמורה וטוענים את המסך מחדש
+      if (err.code === 'invalid_link' || err.code === 'not_found') {
+        forgetCache(fn, args);
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      }
+    });
+  return JSON.parse(cached);
+}
+
+export async function analyzeNutrition(key, recipeId) {
+  let res;
+  try {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/nutrition`, {
+      method: 'POST',
+      headers: HEADERS,
+      body: JSON.stringify({ key, recipe_id: recipeId }),
+    });
+  } catch {
+    throw new ApiError('network');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || 'default');
+  return data.nutrition;
+}
+
 async function imagesFn(body) {
   let res;
   try {
@@ -64,9 +146,12 @@ async function imagesFn(body) {
   return data;
 }
 
-export const signUploads = (key, count, ext) => imagesFn({ action: 'sign', key, count, ext });
-export const deleteImages = (key, paths) =>
-  paths.length ? imagesFn({ action: 'delete', key, paths }).catch(() => null) : Promise.resolve();
+export const signUploads = (key, count, ext) => imagesFn({ action: 'sign', key, count, ext, thumbs: true });
+// מוחק גם את התמונות המוקטנות
+export const deleteImages = (key, paths) => {
+  const all = paths.flatMap((p) => [p, thumbPath(p)]);
+  return all.length ? imagesFn({ action: 'delete', key, paths: all }).catch(() => null) : Promise.resolve();
+};
 
 export async function uploadToSigned(path, token, blob) {
   const url = `${SUPABASE_URL}/storage/v1/object/upload/sign/${IMAGE_BUCKET}/${path}?token=${encodeURIComponent(token)}`;
@@ -79,3 +164,8 @@ export async function uploadToSigned(path, token, blob) {
 }
 
 export const imageUrl = (path) => `${SUPABASE_URL}/storage/v1/object/public/${IMAGE_BUCKET}/${path}`;
+
+// תמונה מוקטנת (לכרטיסים): אותו שם עם _t. לתמונות ישנות בלי גרסה מוקטנת יש נפילה אוטומטית לתמונה המלאה.
+export const thumbPath = (path) => path.replace(/(\.\w+)$/, '_t$1');
+export const thumbImg = (path, cls = '', alt = '') =>
+  `<img src="${imageUrl(thumbPath(path))}" data-full="${imageUrl(path)}" onerror="if(this.dataset.full&&this.src!==this.dataset.full){this.src=this.dataset.full}" alt="${alt}" loading="lazy" class="${cls}">`;

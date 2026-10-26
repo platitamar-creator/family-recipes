@@ -11,19 +11,32 @@ export const esc = (s) =>
 // טקסט חופשי עם שבירות שורה
 export const multiline = (s) => esc(s).replace(/\n/g, '<br>');
 
-export function toast(message, kind = 'ok') {
+// action: { label, onClick } מוסיף כפתור להודעה (למשל "ביטול" אחרי מחיקה)
+export function toast(message, kind = 'ok', action = null) {
   const box = $('#toasts');
   const el = document.createElement('div');
   const colors = kind === 'error' ? 'bg-berry-500 text-white' : 'bg-cocoa-900 text-cream-50';
-  el.className = `pointer-events-auto animate-rise rounded-2xl px-5 py-3 shadow-lift ${colors} max-w-md text-center`;
-  el.textContent = message;
+  el.className = `pointer-events-auto animate-rise flex items-center gap-3 rounded-2xl px-5 py-3 shadow-lift ${colors} max-w-md text-center`;
+  const text = document.createElement('span');
+  text.textContent = message;
+  el.appendChild(text);
+  if (action) {
+    const b = document.createElement('button');
+    b.className = 'shrink-0 rounded-xl bg-white/15 px-3 py-1 font-medium hover:bg-white/25';
+    b.textContent = action.label;
+    b.addEventListener('click', () => {
+      el.remove();
+      Promise.resolve(action.onClick()).catch(showError);
+    });
+    el.appendChild(b);
+  }
   box.appendChild(el);
   setTimeout(() => {
     el.style.transition = 'opacity .3s, transform .3s';
     el.style.opacity = '0';
     el.style.transform = 'translateY(8px)';
     setTimeout(() => el.remove(), 300);
-  }, kind === 'error' ? 4500 : 2600);
+  }, action ? 7000 : kind === 'error' ? 4500 : 2600);
 }
 
 export const showError = (err) => toast(err?.message || 'אופס, משהו השתבש 🔥', 'error');

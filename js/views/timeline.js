@@ -1,5 +1,5 @@
 // "מה בישלנו": ציר זמן של כל ההכנות בבית, מבט על מתכון אחד, והשוואה בין מתכונים
-import { rpc, imageUrl } from '../api.js';
+import { rpcCached, thumbImg } from '../api.js';
 import { esc, avatar, loading, cookedAgo, $, $$ } from '../ui.js';
 import { topBar } from './common.js';
 import { panSVG } from '../decor.js';
@@ -55,13 +55,18 @@ function topBy(list, key) {
   return Object.entries(counts).sort((a, b) => b[1] - a[1]);
 }
 
-export async function renderTimeline(view, ctx, focusRecipeId = null) {
-  if (!view.app.querySelector('[data-timeline-page]')) view.app.innerHTML = loading('מדפדפים ביומן המטבח...');
-  const data = await rpc('get_timeline', { p_token: ctx.token });
+export async function renderTimeline(view, ctx, focusRecipeId = null, fresh = null) {
+  if (!fresh && !view.app.querySelector('[data-timeline-page]')) view.app.innerHTML = loading('מדפדפים ביומן המטבח...');
+  const data = fresh || (await rpcCached('get_timeline', { p_token: ctx.token }, (newer) => {
+    if (!view.isCurrent()) return;
+    const y = window.scrollY;
+    renderTimeline(view, ctx, null, newer).then(() => window.scrollTo({ top: y }));
+  }));
   if (!view.isCurrent()) return;
 
-  const { house, members, recipes, cooks } = data;
-  const memberById = Object.fromEntries(members.map((m) => [m.id, m]));
+  const { house, recipes, cooks } = data;
+  const memberById = Object.fromEntries(data.members.map((m) => [m.id, m]));
+  const members = data.members.filter((m) => !m.archived);
   const recipeById = Object.fromEntries(recipes.map((r) => [r.id, r]));
   const st = state.get(ctx.token) || { range: '12', tab: 'all', focus: null, compare: [], who: new Set() };
   state.set(ctx.token, st);
@@ -209,7 +214,7 @@ export async function renderTimeline(view, ctx, focusRecipeId = null) {
     const r = recipeById[k.recipe_id];
     const m = memberById[k.member_id];
     const thumb = r?.cover
-      ? `<img src="${esc(imageUrl(r.cover))}" alt="" loading="lazy" class="h-11 w-11 shrink-0 rounded-xl object-cover">`
+      ? thumbImg(r.cover, 'h-11 w-11 shrink-0 rounded-xl object-cover')
       : '<span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cream-200 text-xl">🍲</span>';
     return `
       <li class="relative flex items-start gap-3 py-2.5">

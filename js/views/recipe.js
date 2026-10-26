@@ -1,6 +1,6 @@
 // מסך מתכון: תמונות, מצרכים (עם רשימת קניות לוואטסאפ), שלבים,
 // אפשרויות לשינוי, דירוגי בני הבית ויומן הערות.
-import { rpc, imageUrl, deleteImages } from '../api.js';
+import { rpc, rpcCached, imageUrl, analyzeNutrition } from '../api.js';
 import { getChecks, setChecks, getGuestName, setGuestName } from '../store.js';
 import {
   esc, multiline, avatar, loading, difficultyIcons, tagChip, totalTime, timeAgo, formatDate,
@@ -10,7 +10,19 @@ import { topBar, shareLinks } from './common.js';
 import { confetti } from '../decor.js';
 
 // מצב הממשק נשמר בין רענונים של אותו מתכון
-const ui = { shopMode: false, doneSteps: new Set(), recipeId: null };
+const ui = { shopMode: false, doneSteps: new Set(), recipeId: null, nutScope: 'serving' };
+
+// ערכים יומיים מומלצים (למבוגר, 2000 קק״ל) לחישוב "% מהיומי"
+const DAILY = { kcal: 2000, protein_g: 50, carbs_g: 275, fiber_g: 28, fat_g: 78, sat_fat_g: 20 };
+const NUTRIENTS = [
+  ['protein_g', 'חלבון', '💪'],
+  ['carbs_g', 'פחמימות', '🍞'],
+  ['fiber_g', 'סיבים', '🌾'],
+  ['fat_g', 'שומן', '🫒'],
+  ['sat_fat_g', 'שומן רווי', '🧈'],
+];
+const fmtG = (v) => (v < 10 ? Math.round(v * 10) / 10 : Math.round(v));
+const fmtIls = (v) => `₪${v < 10 ? (Math.round(v * 10) / 10).toFixed(1) : Math.round(v)}`;
 
 // רק קישורי http/https, למקרה שמשהו מוזר נכנס
 const safeUrl = (u) => (/^https?:\/\//i.test(u) ? u : '#');
@@ -27,10 +39,18 @@ const formatDay = (day) =>
 
 const FACES = (s) => (s >= 10 ? '🤩' : s >= 8 ? '😋' : s >= 6 ? '🙂' : s >= 4 ? '😐' : '😖');
 
-// cached: נתונים שכבר נטענו, לשינויי תצוגה מקומיים (סימון שלב, רשימת קניות) בלי לפנות לשרת
-export async function renderRecipe(view, ctx, recipeId, cached = null) {
+// cached: נתונים שכבר נטענו, לשינויי תצוגה מקומיים (סימון שלב, רשימת קניות) בלי לפנות לשרת.
+// fresh: אחרי פעולה (דירוג, הערה...) מביאים גרסה טרייה מהשרת ולא מהזיכרון המקומי.
+export async function renderRecipe(view, ctx, recipeId, cached = null, { fresh = false } = {}) {
   if (!cached && !view.app.querySelector('[data-recipe-page]')) view.app.innerHTML = loading('מחממים את התנור...');
-  const data = cached || (await rpc('get_recipe', { p_token: ctx.token, p_recipe_id: recipeId }));
+  const args = { p_token: ctx.token, p_recipe_id: recipeId };
+  const data = cached || (fresh
+    ? await rpc('get_recipe', args)
+    : await rpcCached('get_recipe', args, (newer) => {
+      if (!view.isCurrent()) return;
+      const y = window.scrollY;
+      renderRecipe(view, ctx, recipeId, newer).then(() => window.scrollTo({ top: y }));
+    }));
   if (!view.isCurrent()) return;
 
   const { recipe: r, house, members, role, me, variations, ratings, comments } = data;
@@ -42,9 +62,10 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
     ui.doneSteps = new Set();
   }
   const memberById = Object.fromEntries(members.map((m) => [m.id, m]));
+  const activeMembers = members.filter((m) => !m.archived);
   const reload = async (local = false) => {
     const y = window.scrollY;
-    await renderRecipe(view, ctx, r.id, local ? data : null);
+    await renderRecipe(view, ctx, r.id, local ? data : null, { fresh: !local });
     window.scrollTo({ top: y });
   };
 
@@ -77,9 +98,11 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
         ${r.prep_minutes ? `<span class="chip bg-white shadow-soft">🔪 הכנה ${r.prep_minutes} דק׳</span>` : ''}
         ${r.cook_minutes ? `<span class="chip bg-white shadow-soft">🔥 בישול ${r.cook_minutes} דק׳</span>` : ''}
         ${time && r.prep_minutes && r.cook_minutes ? `<span class="chip bg-white shadow-soft">⏱️ סה״כ ${time}</span>` : ''}
-        ${r.servings ? `<span class="chip bg-white shadow-soft">🍽️ ${esc(r.servings)}</span>` : ''}
+        ${r.servings_count || r.servings ? `<span class="chip bg-white shadow-soft">🍽️ ${r.servings_count ? `${r.servings_count} מנות` : ''}${r.servings_count && r.servings ? ' · ' : ''}${esc(r.servings || '')}</span>` : ''}
       </div>
       ${r.tags.length ? `<div class="mb-3 flex flex-wrap gap-1.5">${r.tags.map((t) => tagChip(t)).join('')}</div>` : ''}
+      ${(data.editing || []).length ? `<p class="mb-3 flex items-center gap-2 rounded-2xl bg-honey-100 px-4 py-2 text-sm no-print">✏️
+          <span><b>${data.editing.map((e) => esc(e.member?.name || '')).join(', ')}</b> ${data.editing.length === 1 ? 'עורך/ת' : 'עורכים'} את המתכון הזה עכשיו</span></p>` : ''}
       ${r.source_url ? `<a href="${esc(safeUrl(r.source_url))}" target="_blank" rel="noopener noreferrer"
           class="mb-3 flex items-center gap-3 rounded-2xl border-2 border-dashed border-sage-300 bg-sage-50 px-4 py-3 transition hover:bg-sage-100">
           <span class="text-2xl">🌐</span>
@@ -149,7 +172,7 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
 
   // ----- דירוגי בני הבית: אזור בולט ונפרד -----
   const rated = ratings.map((x) => ({ ...x, member: memberById[x.member_id] })).filter((x) => x.member);
-  const notRated = members.filter((m) => !ratings.some((x) => x.member_id === m.id));
+  const notRated = activeMembers.filter((m) => !ratings.some((x) => x.member_id === m.id));
   const myRating = me ? ratings.find((x) => x.member_id === me.id) : null;
   const avg = rated.length ? rated.reduce((s, x) => s + x.score, 0) / rated.length : null;
 
@@ -207,7 +230,7 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
             <h3 class="mb-1 text-lg text-spice-700">${esc(v.title)}</h3>
             <p class="mb-2 leading-relaxed">${multiline(v.body)}</p>
             <p class="text-xs text-cocoa-500">${esc(v.author_name)} · ${timeAgo(v.created_at)}</p>
-            ${isMember ? `<button data-action="del-variation" data-id="${esc(v.id)}" class="absolute left-3 top-3 text-cocoa-300 hover:text-berry-500" title="מחיקה">✕</button>` : ''}
+            ${isMember ? `<button data-action="del-variation" data-id="${esc(v.id)}" class="absolute left-3 top-3 grayscale hover:grayscale-0 no-print" title="מחיקה" aria-label="מחיקת הגרסה">🗑️</button>` : ''}
           </article>`).join('')}
       </div>` : ''}
       <details class="card p-4" ${variations.length ? '' : 'open'}>
@@ -238,9 +261,9 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
             <li class="group flex items-start gap-3 py-2 leading-8">
               <span class="shrink-0 pt-px text-xs leading-8 text-cocoa-500" title="${esc(new Date(c.created_at).toLocaleString('he-IL'))}">${timeAgo(c.created_at)}</span>
               <p class="min-w-0 flex-1"><b class="${c.member_id ? 'text-sage-700' : 'text-spice-700'}">${esc(c.author_name)}:</b> ${multiline(c.body)}</p>
-              ${isMember ? `<span class="flex shrink-0 gap-1 opacity-60 transition group-hover:opacity-100">
+              ${isMember ? `<span class="flex shrink-0 gap-1.5 no-print">
                 <button data-action="pin" data-id="${esc(c.id)}" data-pinned="${c.is_pinned}" title="${c.is_pinned ? 'ביטול הצמדה' : 'הצמדה כ"חשוב"'}" class="${c.is_pinned ? '' : 'grayscale'}">📌</button>
-                <button data-action="del-comment" data-id="${esc(c.id)}" title="מחיקה" class="text-cocoa-300 hover:text-berry-500">✕</button>
+                <button data-action="del-comment" data-id="${esc(c.id)}" title="מחיקת ההודעה" aria-label="מחיקת ההודעה" class="grayscale hover:grayscale-0">🗑️</button>
               </span>` : ''}
             </li>`).join('') : '<li class="py-4 text-center text-cocoa-500">היומן ריק. בישלתם? ספרו איך יצא! ✍️</li>'}
         </ul>
@@ -251,6 +274,91 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
         </form>
       </div>
     </section>`;
+
+  // ----- ערכים תזונתיים ומחיר (הערכת AI) -----
+  const nut = data.nutrition;
+  const hasIngredients = realItems.length > 0;
+  let nutritionSection = '';
+  if (nut?.data) {
+    const n = nut.data;
+    const per = ui.nutScope === 'serving';
+    const vals = per ? n.per_serving : n.total;
+    const pct = (k) => Math.round((vals[k] / DAILY[k]) * 100);
+    nutritionSection = `
+      <section class="mb-8">
+        <div class="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 class="section-title text-2xl">🥗 ערכים תזונתיים ומחיר</h2>
+            <p class="text-sm text-cocoa-500">הערכה של AI. לא מדויקת, אבל נותנת כיוון.</p>
+          </div>
+          <div class="inline-flex rounded-2xl bg-cream-200 p-1 text-sm no-print" role="tablist">
+            <button data-action="nut-scope" data-scope="serving" role="tab" aria-selected="${per}" class="rounded-xl px-3 py-1 ${per ? 'bg-white text-spice-700 shadow-soft' : 'text-cocoa-700'}">למנה</button>
+            <button data-action="nut-scope" data-scope="total" role="tab" aria-selected="${!per}" class="rounded-xl px-3 py-1 ${!per ? 'bg-white text-spice-700 shadow-soft' : 'text-cocoa-700'}">לכל המתכון (${n.servings} מנות)</button>
+          </div>
+        </div>
+        ${nut.stale ? `<div class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-honey-100 px-4 py-2 text-sm no-print">
+            <span>⚠️ המצרכים או מספר המנות השתנו מאז החישוב.</span>
+            ${isMember ? '<button data-action="nutrition" class="btn-soft btn-sm">🔄 לחשב מחדש</button>' : ''}</div>` : ''}
+        <div class="card p-4 sm:p-5">
+          <div class="mb-4 grid grid-cols-2 gap-3">
+            <div class="rounded-2xl bg-spice-100 p-3 text-center">
+              <p class="text-xs text-spice-700">קלוריות ${per ? 'למנה' : 'בכל המתכון'}</p>
+              <p class="font-display text-4xl text-spice-700">${Math.round(vals.kcal)}</p>
+              ${per ? `<p class="text-xs text-cocoa-500">${pct('kcal')}% מהיומי</p>` : ''}
+            </div>
+            <div class="rounded-2xl bg-sage-100 p-3 text-center">
+              <p class="text-xs text-sage-700">מחיר משוער ${per ? 'למנה' : 'לכל המתכון'}</p>
+              <p class="font-display text-4xl text-sage-700">${fmtIls(vals.price_ils)}</p>
+              <p class="text-xs text-cocoa-500">${per ? `${fmtIls(n.total.price_ils)} לכל המתכון` : `${fmtIls(n.per_serving.price_ils)} למנה`}</p>
+            </div>
+          </div>
+          <ul class="mb-4 space-y-2">
+            ${NUTRIENTS.map(([k, label, icon]) => `
+              <li>
+                <div class="mb-0.5 flex items-baseline justify-between text-sm">
+                  <span>${icon} ${label}</span>
+                  <span><b>${fmtG(vals[k])}</b> ג׳${per ? ` <span class="text-xs text-cocoa-500">· ${pct(k)}% מהיומי</span>` : ''}</span>
+                </div>
+                ${per ? `<div class="h-2 rounded-full bg-cream-200"><div class="h-2 rounded-full ${k === 'sat_fat_g' && pct(k) > 30 ? 'bg-berry-500' : 'bg-sage-500'}" style="width:${Math.min(100, pct(k))}%"></div></div>` : ''}
+              </li>`).join('')}
+          </ul>
+          ${n.highlights?.length ? `
+            <div class="mb-3 flex flex-wrap gap-2">
+              ${n.highlights.map((h) => `<span class="chip bg-honey-100" title="${esc(h.detail)}">${esc(h.emoji)} ${esc(h.label)}</span>`).join('')}
+            </div>
+            <ul class="mb-3 space-y-1 text-xs text-cocoa-500">${n.highlights.map((h) => `<li>${esc(h.emoji)} <b>${esc(h.label)}:</b> ${esc(h.detail)}</li>`).join('')}</ul>` : ''}
+          ${n.servings_assumed ? `<p class="mb-3 rounded-xl bg-cream-100 p-2 text-xs text-cocoa-700">ℹ️ מספר המנות (${n.servings}) הוא הערכה של ה-AI. כדאי למלא "מספר מנות" בעריכת המתכון.</p>` : ''}
+          <details class="rounded-2xl bg-cream-50 p-3 text-sm">
+            <summary class="cursor-pointer font-medium text-spice-700">פירוט לפי מצרכים והנחות</summary>
+            <div class="mt-2 overflow-x-auto">
+              <table class="w-full min-w-[28rem] text-xs">
+                <thead><tr class="border-b border-cream-200 text-right text-cocoa-500">
+                  <th class="py-1 font-medium">מצרך</th><th class="font-medium">כמות</th><th class="font-medium">קק״ל</th>
+                  <th class="font-medium">חלבון</th><th class="font-medium">שומן</th><th class="font-medium">מחיר</th></tr></thead>
+                <tbody>${n.ingredients.map((i) => `<tr class="border-b border-cream-200 last:border-0">
+                  <td class="py-1">${esc(i.name)}</td><td>${esc(i.amount)}</td><td>${Math.round(i.kcal)}</td>
+                  <td>${fmtG(i.protein_g)}</td><td>${fmtG(i.fat_g)}</td><td>${fmtIls(i.price_ils)}</td></tr>`).join('')}</tbody>
+              </table>
+            </div>
+            ${n.assumptions?.length ? `<p class="mt-3 font-medium">הנחות:</p><ul class="list-disc pr-5 text-cocoa-700">${n.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+            <p class="mt-2 text-xs text-cocoa-500">חושב ${timeAgo(nut.created_at)} · ${esc(nut.model)} · ביטחון: ${{ low: 'נמוך', medium: 'בינוני', high: 'גבוה' }[n.confidence] || 'בינוני'}</p>
+          </details>
+          ${isMember && !nut.stale ? '<button data-action="nutrition" class="btn-ghost btn-sm mt-2 no-print">🔄 לחשב מחדש</button>' : ''}
+        </div>
+      </section>`;
+  } else if (isMember) {
+    nutritionSection = `
+      <section class="mb-8 no-print">
+        <div class="card flex flex-col items-center gap-3 p-5 text-center sm:flex-row sm:text-right">
+          <span class="text-4xl">🥗</span>
+          <div class="flex-1">
+            <h2 class="font-display text-xl">כמה קלוריות? כמה זה עולה?</h2>
+            <p class="text-sm text-cocoa-500">${hasIngredients ? 'ה-AI יעריך ערכים תזונתיים ומחיר, למנה ולכל המתכון.' : 'כדי לחשב, צריך קודם לכתוב מצרכים במתכון.'}</p>
+          </div>
+          <button data-action="nutrition" class="btn-primary shrink-0" ${hasIngredients ? '' : 'disabled'}>✨ לחשב עכשיו</button>
+        </div>
+      </section>`;
+  }
 
   // ----- היסטוריית הכנות -----
   const cooksSection = cooks.length ? `
@@ -289,6 +397,7 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
         ${ingredients}
         ${steps}
       </div>
+      ${nutritionSection}
       ${membersSection}
       ${cooksSection}
       ${variationsSection}
@@ -312,7 +421,7 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
           <input id="c-date" name="date" type="date" class="input" value="${today}" max="${today}" required></div>
         <div><span class="label">מי בישל?</span>
           <div class="flex flex-wrap gap-2" data-who>
-            ${members.map((m) => `<button type="button" data-member="${esc(m.id)}" aria-pressed="${m.id === who}" class="chip-toggle ${m.id === who ? 'is-on' : ''}">${esc(m.name)}</button>`).join('')}
+            ${activeMembers.map((m) => `<button type="button" data-member="${esc(m.id)}" aria-pressed="${m.id === who}" class="chip-toggle ${m.id === who ? 'is-on' : ''}">${esc(m.name)}</button>`).join('')}
           </div></div>
         <div><label class="label" for="c-note">איך יצא? (לא חובה)</label>
           <input id="c-note" name="note" class="input" maxlength="300" placeholder="למשל: עם יותר שום, ונגמר תוך 5 דקות 😄"></div>
@@ -369,6 +478,23 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
 
   onAction(app, {
     cooked: (el) => openCooked(el),
+    nutrition: (el) => {
+      el.innerHTML = '<span class="animate-spin inline-block">🥄</span> מחשבים...';
+      el.disabled = true;
+      busy(null, async () => {
+        try {
+          data.nutrition = await analyzeNutrition(ctx.token, r.id);
+          toast('הערכים חושבו ✨');
+          await reload(true);
+        } finally {
+          if (el.isConnected) { el.disabled = false; el.textContent = '✨ לחשב עכשיו'; }
+        }
+      });
+    },
+    'nut-scope': (el) => {
+      ui.nutScope = el.dataset.scope;
+      reload(true);
+    },
     'del-cook': async (el) => {
       if (!(await confirmDialog('למחוק את ההכנה הזו מההיסטוריה?'))) return;
       busy(null, async () => {
@@ -409,11 +535,17 @@ export async function renderRecipe(view, ctx, recipeId, cached = null) {
     print: () => window.print(),
     share: () => openShare(r, house),
     delete: async () => {
-      if (!(await confirmDialog(`למחוק את "${esc(r.title)}"? <br><span class="text-sm text-cocoa-500">כולל התמונות, הדירוגים וההערות. אין דרך חזרה 😬</span>`))) return;
+      if (!(await confirmDialog(`למחוק את "${esc(r.title)}"? <br><span class="text-sm text-cocoa-500">המתכון יעבור לסל המיחזור לשלושים יום, ואפשר לשחזר אותו משם (בהגדרות).</span>`))) return;
       await busy(null, async () => {
-        const paths = await rpc('delete_recipe', { p_token: ctx.token, p_recipe_id: r.id });
-        await deleteImages(ctx.token, paths);
-        toast('המתכון נמחק 🫡');
+        await rpc('delete_recipe', { p_token: ctx.token, p_recipe_id: r.id });
+        toast('המתכון הועבר לסל המיחזור 🗑️', 'ok', {
+          label: 'ביטול',
+          onClick: async () => {
+            await rpc('restore_recipe', { p_token: ctx.token, p_recipe_id: r.id });
+            toast('המתכון חזר ✓');
+            location.hash = `${ctx.base}/r/${r.id}`;
+          },
+        });
         location.hash = ctx.base;
       });
     },

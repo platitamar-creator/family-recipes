@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
     auth: { persistSession: false },
   });
 
-  let body: { action?: string; key?: string; count?: number; ext?: string; paths?: string[] };
+  let body: { action?: string; key?: string; count?: number; ext?: string; paths?: string[]; thumbs?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -40,16 +40,26 @@ Deno.serve(async (req) => {
     const ext = ["webp", "jpg", "png"].includes(body.ext ?? "") ? body.ext : "webp";
     const uploads = [];
     for (let i = 0; i < count; i++) {
-      const path = `${prefix}${crypto.randomUUID()}.${ext}`;
+      const id = `${prefix}${crypto.randomUUID()}`;
+      const path = `${id}.${ext}`;
       const { data, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(path);
       if (error) return json({ error: "storage_error" }, 500);
-      uploads.push({ path, token: data.token });
+      const upload: Record<string, string> = { path, token: data.token };
+      // תמונה מוקטנת לכרטיסים: אותו שם עם _t
+      if (body.thumbs) {
+        const thumbPath = `${id}_t.${ext}`;
+        const t = await admin.storage.from(BUCKET).createSignedUploadUrl(thumbPath);
+        if (t.error) return json({ error: "storage_error" }, 500);
+        upload.thumbPath = thumbPath;
+        upload.thumbToken = t.data.token;
+      }
+      uploads.push(upload);
     }
     return json({ uploads });
   }
 
   if (body.action === "delete") {
-    const paths = (body.paths ?? []).filter((p) => typeof p === "string" && p.startsWith(prefix)).slice(0, 50);
+    const paths = (body.paths ?? []).filter((p) => typeof p === "string" && p.startsWith(prefix)).slice(0, 100);
     if (paths.length) await admin.storage.from(BUCKET).remove(paths);
     return json({ deleted: paths.length });
   }

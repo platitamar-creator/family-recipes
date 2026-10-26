@@ -1,5 +1,5 @@
 // מסך הבית: כל המתכונים, חיפוש וסינון לפי תגיות שמגיעות ממסד הנתונים
-import { rpc, imageUrl } from '../api.js';
+import { rpcCached, thumbImg } from '../api.js';
 import { saveHouse, getHouse } from '../store.js';
 import { esc, avatar, quoteCard, loading, difficultyIcons, totalTime, tagChip, $, $$ } from '../ui.js';
 import { topBar } from './common.js';
@@ -41,16 +41,23 @@ function hashOf(s) {
   return Math.abs(h);
 }
 
-export async function renderHouse(view, ctx) {
-  view.app.innerHTML = loading('פותחים את ספר המתכונים...');
-  const data = await rpc('get_house', { p_token: ctx.token });
+export async function renderHouse(view, ctx, fresh = null) {
+  if (!fresh) view.app.innerHTML = loading('פותחים את ספר המתכונים...');
+  // מציגים מיד את מה ששמור במכשיר, ומתרעננים כשמגיעה גרסה חדשה
+  const data = fresh || (await rpcCached('get_house', { p_token: ctx.token }, (newer) => {
+    if (!view.isCurrent()) return;
+    const y = window.scrollY;
+    renderHouse(view, ctx, newer).then(() => window.scrollTo({ top: y }));
+  }));
   if (!view.isCurrent()) return;
 
-  const { house, members, tag_groups: groups, recipes, role, me } = data;
+  const { house, tag_groups: groups, recipes, role, me } = data;
+  const allMembers = data.members;
+  const members = allMembers.filter((m) => !m.archived);
   const isMember = role === 'member';
   if (isMember && getHouse(house.id)) saveHouse(house.id, { name: house.name, emoji: house.emoji, member: me });
 
-  const memberById = Object.fromEntries(members.map((m) => [m.id, m]));
+  const memberById = Object.fromEntries(allMembers.map((m) => [m.id, m]));
   const f = filterState.get(ctx.token) || { text: '', tags: new Set(), loved: new Set(), diff: new Set(), sort: 'new', open: window.innerWidth >= 768 };
   filterState.set(ctx.token, f);
 
@@ -136,7 +143,7 @@ export async function renderHouse(view, ctx) {
 
   function card(r, i) {
     const cover = r.cover
-      ? `<img src="${esc(imageUrl(r.cover))}" alt="" loading="lazy" class="h-full w-full object-cover transition duration-500 group-hover:scale-105">`
+      ? thumbImg(r.cover, 'h-full w-full object-cover transition duration-500 group-hover:scale-105')
       : `<div class="flex h-full w-full items-center justify-center text-7xl" style="background:${BG[hashOf(r.title) % BG.length]}">
            <span class="transition group-hover:animate-wiggle">${FOOD[hashOf(r.title) % FOOD.length]}</span></div>`;
     const tags = r.tag_ids.map((id) => tagById[id]).filter(Boolean);
@@ -154,7 +161,10 @@ export async function renderHouse(view, ctx) {
           ${r.description ? `<p class="line-clamp-2 text-sm text-cocoa-500">${esc(r.description)}</p>` : ''}
           <div class="mt-auto flex items-center justify-between pt-1 text-sm text-cocoa-500">
             ${difficultyIcons(r.difficulty, 'text-sm')}
-            ${time ? `<span>⏱️ ${time}</span>` : ''}
+            <span class="flex items-center gap-2">
+              ${r.kcal_per_serving ? `<span title="קלוריות למנה (הערכה)">🔥 ${Math.round(r.kcal_per_serving)}</span>` : ''}
+              ${time ? `<span>⏱️ ${time}</span>` : ''}
+            </span>
           </div>
           ${r.cook_count ? `<p class="text-xs text-sage-700">👩‍🍳 בושל ${r.cook_count === 1 ? 'פעם אחת' : `${r.cook_count} פעמים`} · לאחרונה ${cookedAgo(r.last_cooked)}</p>` : ''}
           ${tags.length ? `<div class="flex flex-wrap gap-1">${tags.slice(0, 4).map((t) => tagChip(t, 'text-xs px-2 py-0.5')).join('')}</div>` : ''}

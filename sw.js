@@ -2,7 +2,7 @@
 // קבצי האתר: קודם רשת (כדי לקבל תמיד את הגרסה העדכנית), ואם אין רשת – מהמטמון.
 // תמונות מתכונים: מהמטמון (הכתובת של כל תמונה ייחודית ולא משתנה).
 // נתונים מ-Supabase לא נשמרים במטמון.
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL = `shell-${VERSION}`;
 const IMAGES = 'recipe-images';
 const SHELL_FILES = [

@@ -2,6 +2,7 @@
 import { signUploads, uploadToSigned } from './api.js';
 
 const MAX_SIDE = 1600;
+const THUMB_SIDE = 480; // לכרטיסים במסך הבית (~25KB במקום ~200KB)
 const QUALITY = 0.82;
 
 async function loadBitmap(file) {
@@ -18,24 +19,29 @@ async function loadBitmap(file) {
   }
 }
 
-function toBlob(canvas, type) {
-  return new Promise((resolve) => canvas.toBlob(resolve, type, QUALITY));
+function toBlob(canvas, type, quality = QUALITY) {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
 }
 
-export async function compressImage(file) {
-  const bmp = await loadBitmap(file);
-  const scale = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
+async function resize(bmp, maxSide, quality) {
+  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
   const width = Math.round(bmp.width * scale);
   const height = Math.round(bmp.height * scale);
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   canvas.getContext('2d').drawImage(bmp, 0, 0, width, height);
-  bmp.close?.();
+  let blob = await toBlob(canvas, 'image/webp', quality);
+  if (!blob || blob.type !== 'image/webp') blob = await toBlob(canvas, 'image/jpeg', quality);
+  return { blob, width, height };
+}
 
-  let blob = await toBlob(canvas, 'image/webp');
-  if (!blob || blob.type !== 'image/webp') blob = await toBlob(canvas, 'image/jpeg');
-  return { blob, width, height, ext: blob.type === 'image/webp' ? 'webp' : 'jpg' };
+export async function compressImage(file) {
+  const bmp = await loadBitmap(file);
+  const full = await resize(bmp, MAX_SIDE, QUALITY);
+  const thumb = await resize(bmp, THUMB_SIDE, 0.75);
+  bmp.close?.();
+  return { ...full, thumb: thumb.blob, ext: full.blob.type === 'image/webp' ? 'webp' : 'jpg' };
 }
 
 // מעלה רשימת קבצים. מחזיר [{ path, width, height }]
@@ -50,6 +56,8 @@ export async function uploadImages(key, files, onProgress = () => {}) {
   for (let i = 0; i < compressed.length; i++) {
     const c = compressed[i];
     await uploadToSigned(uploads[i].path, uploads[i].token, c.blob);
+    // אם התמונה המוקטנת נכשלה, לא נורא: האתר יציג את המלאה
+    if (uploads[i].thumbToken) await uploadToSigned(uploads[i].thumbPath, uploads[i].thumbToken, c.thumb).catch(() => {});
     results.push({ path: uploads[i].path, width: c.width, height: c.height });
     onProgress(i + 1, compressed.length);
   }

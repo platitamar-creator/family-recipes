@@ -1,0 +1,41 @@
+# שומר על מסד הנתונים ער.
+# פרויקט חינמי ב-Supabase מושהה אחרי שבוע בלי פעילות. הבדיקה הזו פונה אליו כל 3 ימים,
+# כך שגם אם אף אחד לא פותח את האתר חודשים, הוא נשאר פעיל.
+# בנוסף, GitHub מכבה בדיקות מתוזמנות במאגר בלי פעילות 60 יום. השלב השני "מדליק מחדש"
+# את הבדיקה בכל הרצה, וכך הספירה מתאפסת.
+# אם הבדיקה נכשלת, GitHub שולח מייל לבעל המאגר.
+name: keep-database-awake
+
+on:
+  schedule:
+    - cron: '17 6 */3 * *'   # כל 3 ימים, בבוקר
+  workflow_dispatch: {}       # אפשר גם להריץ ידנית מלשונית Actions
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase
+        env:
+          URL: https://hbapsveehonfhijnnmsj.supabase.co
+          # מפתח ציבורי (אותו מפתח שנמצא באתר עצמו), לא סוד
+          KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhiYXBzdmVlaG9uZmhpam5ubXNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5NDk2NDYsImV4cCI6MjEwODUyNTY0Nn0.R82OXdw86Ut0wZbpw3tSFmGB27wqHtQRwJbSwTbaRms
+        run: |
+          for i in 1 2 3; do
+            if curl -fsS -X POST "$URL/rest/v1/rpc/keepalive" \
+                 -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{}'; then
+              echo; echo "Supabase is awake"; exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::Supabase did not answer. It may be paused - restore it from the Supabase dashboard."
+          exit 1
+
+      - name: Keep this schedule enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/keepalive.yml/enable"

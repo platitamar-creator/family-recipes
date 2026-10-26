@@ -1,7 +1,8 @@
 // הוספה ועריכה של מתכון (בני בית בלבד)
-import { rpc, imageUrl, deleteImages } from '../api.js';
+import { rpc, deleteImages, thumbImg } from '../api.js';
+import { SUPABASE_URL, SUPABASE_KEY } from '../config.js';
 import { uploadImages } from '../images.js';
-import { esc, loading, toast, showError, onAction, modal, busy, $, $$, DIFFICULTY, TAG_COLORS } from '../ui.js';
+import { esc, loading, toast, showError, onAction, modal, busy, confirmDialog, avatar, $, $$, DIFFICULTY, TAG_COLORS } from '../ui.js';
 import { topBar } from './common.js';
 
 const MAX_IMAGES = 12;
@@ -71,6 +72,9 @@ export async function renderEditor(view, ctx, recipeId) {
     prep: r.prep_minutes ?? '',
     cook: r.cook_minutes ?? '',
     servings: r.servings ?? '',
+    servings_count: r.servings_count ?? '',
+    // מתי המתכון נשמר לאחרונה כשהתחלנו לערוך (לזיהוי שמירה של מישהו אחר בינתיים)
+    baseUpdatedAt: r.updated_at ?? null,
     source_url: r.source_url ?? '',
     ingredients: ingredientsToText(r.ingredients),
     steps: r.steps.length ? r.steps.map((s) => s.text) : [''],
@@ -90,6 +94,7 @@ export async function renderEditor(view, ctx, recipeId) {
   view.mount(`
     ${topBar({ back: backHref, backLabel: recipeId ? 'חזרה למתכון' : house.house.name })}
     <h1 class="mb-6 text-3xl">${recipeId ? '✏️ עריכת מתכון' : '✨ מתכון חדש'}</h1>
+    <div id="editing-banner"></div>
     ${draft ? `<div class="mb-5 flex items-center justify-between gap-3 rounded-2xl bg-honey-100 px-4 py-3 text-sm">
       <span>📝 המשכנו מאיפה שעצרת. כל מה שהקלדת נשמר.</span>
       <button type="button" data-action="discard-draft" class="btn-ghost btn-sm shrink-0">להתחיל מחדש</button>
@@ -116,11 +121,13 @@ export async function renderEditor(view, ctx, recipeId) {
           </div>
           <p id="diff-label" class="mt-1.5 text-sm text-cocoa-500"></p>
         </div>
-        <div class="grid grid-cols-3 gap-3">
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div><label class="label" for="f-prep">הכנה (דקות)</label><input id="f-prep" type="number" min="0" max="10000" inputmode="numeric" class="input" value="${esc(d.prep)}"></div>
           <div><label class="label" for="f-cook">בישול (דקות)</label><input id="f-cook" type="number" min="0" max="10000" inputmode="numeric" class="input" value="${esc(d.cook)}"></div>
-          <div><label class="label" for="f-serv">כמות</label><input id="f-serv" class="input" maxlength="40" value="${esc(d.servings)}" placeholder="6 מנות"></div>
+          <div><label class="label" for="f-count">מספר מנות</label><input id="f-count" type="number" min="1" max="200" inputmode="numeric" class="input" value="${esc(d.servings_count ?? '')}" placeholder="4"></div>
+          <div><label class="label" for="f-serv">גודל / הערה</label><input id="f-serv" class="input" maxlength="40" value="${esc(d.servings)}" placeholder="תבנית 24×34"></div>
         </div>
+        <p class="-mt-2 text-xs text-cocoa-500">"מספר מנות" משמש לחישוב ערכים ומחיר למנה.</p>
         <div>
           <label class="label" for="f-link">🔗 קישור למתכון באינטרנט (לא חובה)</label>
           <input id="f-link" type="text" inputmode="url" autocomplete="off" spellcheck="false" dir="ltr" class="input text-left" maxlength="1000" value="${esc(d.source_url)}" placeholder="https://...">
@@ -171,6 +178,44 @@ export async function renderEditor(view, ctx, recipeId) {
 
   const app = view.app;
 
+  // ---------- "מישהו עורך עכשיו" ----------
+  // כל דקה מודיעים לשרת שאנחנו עורכים, ומקבלים מי עוד עורך את אותו מתכון
+  if (recipeId) {
+    const ping = async () => {
+      if (!app.isConnected) return stopPresence();
+      try {
+        const others = await rpc('start_editing', { p_token: ctx.token, p_recipe_id: recipeId });
+        const banner = $('#editing-banner', app);
+        if (banner) banner.innerHTML = others.length ? `
+          <div class="mb-5 flex items-start gap-3 rounded-2xl border-2 border-honey-300 bg-honey-100 px-4 py-3 text-sm">
+            <span class="text-xl">✋</span>
+            <span><b>${others.map((o) => `${avatar(o.member, 6)} ${esc(o.member.name)}`).join(', ')}</b>
+              ${others.length === 1 ? 'עורך/ת' : 'עורכים'} את המתכון הזה כרגע.<br>
+              <span class="text-cocoa-700">כדאי לתאם ביניכם. אם שניכם תשמרו, נשאל לפני שנדרוס שינויים.</span></span>
+          </div>` : '';
+      } catch {
+        /* לא קריטי */
+      }
+    };
+    const timer = setInterval(ping, 60000);
+    const stopPresence = () => {
+      clearInterval(timer);
+      window.removeEventListener('hashchange', onLeave);
+      window.removeEventListener('pagehide', onLeave);
+      // keepalive: הבקשה נשלחת גם אם הדף נסגר
+      fetch(`${SUPABASE_URL}/rest/v1/rpc/stop_editing`, {
+        method: 'POST',
+        keepalive: true,
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_token: ctx.token, p_recipe_id: recipeId }),
+      }).catch(() => {});
+    };
+    const onLeave = () => stopPresence();
+    window.addEventListener('hashchange', onLeave);
+    window.addEventListener('pagehide', onLeave);
+    ping();
+  }
+
   function drawDifficulty() {
     $$('[data-diff]', app).forEach((b) => {
       const on = Number(b.dataset.diff) === difficulty;
@@ -183,7 +228,7 @@ export async function renderEditor(view, ctx, recipeId) {
     const box = $('#images', app);
     box.innerHTML = images.map((img, i) => `
       <div class="group relative aspect-square overflow-hidden rounded-2xl bg-cream-200 shadow-soft">
-        <img src="${esc(img.file ? img.preview : imageUrl(img.path))}" class="h-full w-full object-cover" alt="">
+        ${img.file ? `<img src="${esc(img.preview)}" class="h-full w-full object-cover" alt="">` : thumbImg(img.path, 'h-full w-full object-cover')}
         ${i === 0 ? '<span class="absolute right-1.5 top-1.5 rounded-full bg-spice-500 px-2 py-0.5 text-[10px] text-white">שער</span>' : ''}
         <div class="absolute inset-x-0 bottom-0 flex justify-between bg-gradient-to-t from-black/50 to-transparent p-1.5">
           <span class="flex gap-1">
@@ -218,6 +263,8 @@ export async function renderEditor(view, ctx, recipeId) {
       prep: $('#f-prep', app).value,
       cook: $('#f-cook', app).value,
       servings: $('#f-serv', app).value,
+      servings_count: $('#f-count', app).value,
+      baseUpdatedAt: d.baseUpdatedAt,
       source_url: $('#f-link', app).value,
       ingredients: $('#f-ingr', app).value,
       steps,
@@ -368,8 +415,12 @@ export async function renderEditor(view, ctx, recipeId) {
     });
   }
 
-  $('#recipe-form', app).addEventListener('submit', async (e) => {
+  $('#recipe-form', app).addEventListener('submit', (e) => {
     e.preventDefault();
+    save(false);
+  });
+
+  async function save(force) {
     const btn = $('#save', app);
     const label = btn.innerHTML;
     btn.disabled = true;
@@ -393,6 +444,8 @@ export async function renderEditor(view, ctx, recipeId) {
           prep_minutes: $('#f-prep', app).value,
           cook_minutes: $('#f-cook', app).value,
           servings: $('#f-serv', app).value,
+          servings_count: $('#f-count', app).value,
+          ...(recipeId && d.baseUpdatedAt ? { expected_updated_at: d.baseUpdatedAt, force } : {}),
           source_url: $('#f-link', app).value,
           ingredients: textToIngredients($('#f-ingr', app).value),
           steps: steps.map((s) => s.trim()).filter(Boolean).map((text) => ({ text })),
@@ -407,9 +460,19 @@ export async function renderEditor(view, ctx, recipeId) {
       toast(recipeId ? 'נשמר! 💾' : 'המתכון נכנס לספר! 🎉');
       location.hash = `${ctx.base}/r/${id}`;
     } catch (err) {
-      showError(err);
       btn.disabled = false;
       btn.innerHTML = label;
+      if (err.code === 'edit_conflict') {
+        saveDraft();
+        const mine = await confirmDialog(
+          'מישהו אחר שמר שינויים במתכון בזמן שערכת ✋<br><span class="text-sm text-cocoa-500">אפשר לשמור את הגרסה שלך (היא תחליף את השינויים שלהם), או לוותר ולראות מה הם שמרו. הטיוטה שלך נשמרת בכל מקרה.</span>',
+          { ok: 'לשמור את שלי', cancel: 'לראות את שלהם', danger: false },
+        );
+        if (mine) return save(true);
+        location.hash = backHref;
+        return;
+      }
+      showError(err);
     }
-  });
+  }
 }
