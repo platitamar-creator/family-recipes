@@ -3,7 +3,8 @@
 // אפשר לבחור מודל אחר עם הסוד GEMINI_MODEL.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
-const MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash"];
+// gemini-3.5-flash ענה תוך ~11 שניות בבדיקה; 3.7 ו-3.8 לא ענו תוך 40 שניות (26.10.2026), ולכן הם גיבוי בלבד
+const MODELS = ["gemini-3.5-flash", "gemini-3.7-flash", "gemini-3.8-flash"];
 const API = "https://generativelanguage.googleapis.com/v1beta/models";
 
 const cors = {
@@ -64,23 +65,49 @@ function clean(n: unknown) {
 const round = (v: number, d = 1) => Math.round(v * 10 ** d) / 10 ** d;
 const KEYS = ["kcal", "protein_g", "carbs_g", "fiber_g", "fat_g", "sat_fat_g", "price_ils"] as const;
 
+const PER_TRY_MS = 35000; // Supabase עוצר פונקציה אחרי 150 שניות, אז לא מחכים לנצח לניסיון אחד
+
 async function askGemini(apiKey: string, prompt: string) {
   const preferred = Deno.env.get("GEMINI_MODEL");
-  const models = preferred ? [preferred, ...MODELS.filter((m) => m !== preferred)] : MODELS;
+  const base = preferred ? [preferred, ...MODELS.filter((m) => m !== preferred)] : MODELS;
+  // המודל הראשון מקבל ניסיון שני אם Gemini עמוס, ואז עוברים למודלים הבאים
+  const models = [base[0], base[0], ...base.slice(1)];
   let lastError = "";
-  for (const model of models) {
-    const res = await fetch(`${API}/${model}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM }] },
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0.2 },
-      }),
-    });
+  let busy = false;
+  for (const [i, model] of models.entries()) {
+    if (i === 1) {
+      if (!busy) continue; // הניסיון הראשון לא נכשל בגלל עומס
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+    const started = Date.now();
+    let res: Response;
+    try {
+      res = await fetch(`${API}/${model}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        signal: AbortSignal.timeout(PER_TRY_MS),
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM }] },
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0.2, maxOutputTokens: 8192 },
+        }),
+      });
+    } catch (e) {
+      busy = true;
+      lastError = `${model}: ${(e as Error).name} after ${Date.now() - started}ms`;
+      console.error("gemini fetch failed", lastError);
+      continue;
+    }
     const text = await res.text();
+    console.log("gemini", model, res.status, `${Date.now() - started}ms`, res.ok ? "" : text.slice(0, 300));
     // מודל שלא קיים (הוצא משימוש) → מנסים את הבא ברשימה
     if (res.status === 404 || (res.status === 400 && /not found|not supported/i.test(text))) {
+      lastError = `${model}: ${res.status}`;
+      continue;
+    }
+    // עומס זמני אצל Google → ממתינים רגע או עוברים למודל אחר
+    if ([429, 500, 503].includes(res.status)) {
+      busy = true;
       lastError = `${model}: ${res.status}`;
       continue;
     }
@@ -92,7 +119,9 @@ async function askGemini(apiKey: string, prompt: string) {
     if (start < 0 || end < start) throw new Error("gemini returned no JSON");
     return { model, result: JSON.parse(out.slice(start, end + 1)) };
   }
-  throw new Error(`no Gemini model available (${lastError})`);
+  const err = new Error(`no Gemini model available (${lastError})`);
+  (err as Error & { busy?: boolean }).busy = busy;
+  throw err;
 }
 
 Deno.serve(async (req) => {
@@ -115,6 +144,7 @@ Deno.serve(async (req) => {
 
   // בודק שהשולח בן בית, שהמתכון שלו, ושלא עברו את המגבלה היומית
   const { data: input, error } = await db.rpc("nutrition_input", { p_token: body.key ?? "", p_recipe_id: body.recipe_id });
+  console.log("nutrition_input", error ? `error: ${error.message}` : "ok");
   if (error) {
     const code = ["ai_limit", "members_only", "not_found", "invalid_link"].find((c) => error.message.includes(c)) ?? "default";
     return json({ error: code }, 400);
@@ -136,7 +166,7 @@ ${lines}`;
     ({ model, result } = await askGemini(apiKey, prompt));
   } catch (e) {
     console.error(e);
-    return json({ error: "ai_error" }, 502);
+    return json({ error: (e as { busy?: boolean }).busy ? "ai_busy" : "ai_error" }, 502);
   }
 
   // לא סומכים על החשבון של המודל: מסכמים בעצמנו
