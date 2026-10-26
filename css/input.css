@@ -39,7 +39,7 @@
     background-image: linear-gradient(transparent 31px, rgba(122, 158, 126, 0.25) 32px);
     background-size: 100% 32px;
   }
-  .sticky-note { @apply bg-honey-100 rounded-2xl shadow-soft; transform: rotate(-1.2deg); }
+  .sticky-note { @apply bg-honey-100 rounded-2xl shadow-soft; }
 
   /* פס מפת שולחן משובצת בראש העמוד, עם שוליים מסולסלים */
   .gingham {

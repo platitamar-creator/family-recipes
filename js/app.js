@@ -8,10 +8,11 @@
 // #/h/<בית>/tags         ניהול תגיות
 // #/h/<בית>/settings     שיתוף והגדרות
 // #/h/<בית>/timeline[/<מתכון>]  מה בישלנו (גם #/v/<קוד>/timeline)
+// #/h/<בית>/shop/<מתכון,מתכון...>  רשימת קניות משותפת לכמה מתכונים (גם #/v/<קוד>/shop/...)
 // #/v/<קוד צפייה>        צפייה בבית (קריאה בלבד)
 // #/v/<קוד צפייה>/r/<מתכון>
 // #/r/<קוד מתכון>        צפייה במתכון בודד
-import { getHouse } from './store.js';
+import { getHouse, getHouses } from './store.js';
 import { errorPage } from './ui.js';
 import { renderHome } from './views/home.js';
 import { renderJoin } from './views/join.js';
@@ -21,6 +22,7 @@ import { renderEditor } from './views/editor.js';
 import { renderTags } from './views/tags.js';
 import { renderSettings } from './views/settings.js';
 import { renderTimeline } from './views/timeline.js';
+import { renderShop } from './views/shop.js';
 import { registerServiceWorker, handleInstallClick } from './install.js';
 import { mountSideDecor } from './decor.js';
 
@@ -68,6 +70,7 @@ async function route() {
       const ctx = { token: a, base: `#/v/${a}`, isMember: false };
       if (sub === 'r' && b) return await renderRecipe(view, ctx, b);
       if (sub === 'timeline') return await renderTimeline(view, ctx, b || null);
+      if (sub === 'shop') return await renderShop(view, ctx, b || '');
       return await renderHouse(view, ctx);
     }
 
@@ -82,6 +85,7 @@ async function route() {
       if (sub === 'tags') return await renderTags(view, ctx);
       if (sub === 'settings') return await renderSettings(view, ctx);
       if (sub === 'timeline') return await renderTimeline(view, ctx, b || null);
+      if (sub === 'shop') return await renderShop(view, ctx, b || '');
       return await renderHouse(view, ctx);
     }
 
@@ -92,6 +96,26 @@ async function route() {
   }
 }
 
+// שיתוף מאפליקציה אחרת (אנדרואיד): "שיתוף ← המתכונים" פותח את האתר עם הטקסט/הקישור.
+// שומרים אותו, ומסך הבית של הבית פותח איתו את "מתכון מקישור".
+function receiveShare() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('share_text') && !q.has('share_url') && !q.has('share_title')) return;
+  const text = [q.get('share_title'), q.get('share_text'), q.get('share_url')]
+    .filter((x, i, all) => x && !all.slice(0, i).some((y) => y && y.includes(x)))
+    .join('\n');
+  history.replaceState(null, '', location.pathname + location.hash);
+  if (!text) return;
+  try {
+    sessionStorage.setItem('frb.shared', text);
+  } catch {
+    /* כלום */
+  }
+  const ids = Object.keys(getHouses());
+  if (ids.length === 1 && !location.hash.startsWith(`#/h/${ids[0]}`)) location.hash = `#/h/${ids[0]}`;
+}
+
+receiveShare();
 window.addEventListener('hashchange', route);
 // כפתור ההתקנה (📲) מופיע בכל מסך
 document.addEventListener('click', (e) => {

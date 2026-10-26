@@ -176,7 +176,7 @@ export function quoteCard(compact = false) {
     </div>`;
   }
   return `<div class="sticky-note relative px-6 py-5">
-    <span class="absolute -top-3 right-8 h-6 w-20 rotate-2 rounded-sm bg-spice-200/70"></span>
+    <span class="absolute -top-3 right-8 h-6 w-20 rounded-sm bg-spice-200/70"></span>
     <p class="mb-1 text-xs font-medium tracking-wide text-cocoa-500">הציטוט היומי</p>
     <div class="flex items-center gap-3">
       <span class="text-4xl">${q.emoji}</span>

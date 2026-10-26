@@ -1,7 +1,8 @@
 // מסך הבית: כל המתכונים, חיפוש וסינון לפי תגיות שמגיעות ממסד הנתונים
-import { rpcCached, thumbImg } from '../api.js';
+import { rpcCached, thumbImg, importRecipe } from '../api.js';
 import { saveHouse, getHouse } from '../store.js';
-import { esc, avatar, quoteCard, loading, difficultyIcons, totalTime, tagChip, $, $$ } from '../ui.js';
+import { esc, avatar, quoteCard, loading, difficultyIcons, totalTime, tagChip, modal, busy, toast, $, $$ } from '../ui.js';
+import { saveImportedDraft } from './editor.js';
 import { topBar } from './common.js';
 import { panSVG } from '../decor.js';
 import { cookedAgo } from '../ui.js';
@@ -9,22 +10,52 @@ import { cookedAgo } from '../ui.js';
 // הסינון נשמר בזמן המעבר בין מסכים (לא בין פתיחות של האתר)
 const filterState = new Map();
 
+// מיונים. כדי להוסיף מיון חדש מוסיפים שורה: key מחזיר ערך למיון (null = אין מידע, תמיד בסוף), desc = מהגדול לקטן
+const avgScore = (r) => (r.ratings.length ? r.ratings.reduce((s, x) => s + x.score, 0) / r.ratings.length : null);
+const minutes = (r) => (r.prep_minutes || r.cook_minutes ? (r.prep_minutes || 0) + (r.cook_minutes || 0) : null);
 const SORTS = [
-  { id: 'new', name: 'עודכנו לאחרונה' },
-  { id: 'cooked', name: 'הכי מבושלים' },
-  { id: 'forgotten', name: 'לא בושלו מזמן' },
-  { id: 'loved', name: 'הכי אהובים' },
-  { id: 'abc', name: 'לפי א-ב' },
+  { id: 'new', name: '✏️ עודכנו לאחרונה', key: (r) => r.updated_at, desc: true },
+  { id: 'added', name: '🆕 נוספו לאחרונה', key: (r) => r.created_at, desc: true },
+  { id: 'loved', name: '❤️ ממוצע דירוג', key: avgScore, desc: true },
+  { id: 'cooked', name: '👩‍🍳 הכי הרבה פעמים', key: (r) => r.cook_count || null, desc: true },
+  { id: 'recent', name: '📅 בושלו לאחרונה', key: (r) => r.last_cooked, desc: true },
+  { id: 'forgotten', name: '🕸️ לא בושלו הכי הרבה זמן', key: (r) => r.last_cooked || '0000' },
+  { id: 'fast', name: '⏱️ הכי מהירים', key: minutes },
+  { id: 'easy', name: '🥄 הכי קלים', key: (r) => r.difficulty },
+  { id: 'cheap', name: '💰 הכי זולים למנה', key: (r) => r.price_per_serving ?? null, needs: 'price' },
+  { id: 'light', name: '🥗 הכי מעט קלוריות', key: (r) => r.kcal_per_serving ?? null, needs: 'kcal' },
+  { id: 'abc', name: '🔤 לפי א-ב', key: (r) => r.title, text: true },
 ];
-const avgScore = (r) => (r.ratings.length ? r.ratings.reduce((s, x) => s + x.score, 0) / r.ratings.length : 0);
-const SORTERS = {
-  new: (a, b) => (b.updated_at > a.updated_at ? 1 : -1),
-  cooked: (a, b) => (b.cook_count || 0) - (a.cook_count || 0) || (b.last_cooked || '').localeCompare(a.last_cooked || ''),
-  // מה שלא בושל אף פעם קודם, ואז מה שבושל הכי מזמן
-  forgotten: (a, b) => (a.last_cooked || '0000').localeCompare(b.last_cooked || '0000'),
-  loved: (a, b) => avgScore(b) - avgScore(a),
-  abc: (a, b) => a.title.localeCompare(b.title, 'he'),
-};
+function sorter(sort, reverse) {
+  const s = SORTS.find((x) => x.id === sort) || SORTS[0];
+  const dir = (s.desc ? -1 : 1) * (reverse ? -1 : 1);
+  return (a, b) => {
+    const ka = s.key(a);
+    const kb = s.key(b);
+    if (ka == null || kb == null) return ka == null && kb == null ? a.title.localeCompare(b.title, 'he') : ka == null ? 1 : -1;
+    const c = s.text || typeof ka === 'string' ? String(ka).localeCompare(String(kb), 'he') : ka - kb;
+    return c * dir || a.title.localeCompare(b.title, 'he');
+  };
+}
+
+// בחירת כמה מתכונים לרשימת קניות משותפת (נשמרת במעבר בין מסכים)
+const picking = new Map();
+export function setPicked(token, ids) {
+  picking.set(token, { on: true, ids: new Set(ids) });
+}
+
+// מתכון ששותף לאפליקציה (מוואטסאפ, אינסטגרם...) ממתין לייבוא
+const SHARED = 'frb.shared';
+function takeShared() {
+  try {
+    const t = sessionStorage.getItem(SHARED);
+    sessionStorage.removeItem(SHARED);
+    return t;
+  } catch {
+    return null;
+  }
+}
+
 const LOVED_SCORE = 8;
 
 const DIFF_BUCKETS = [
@@ -58,8 +89,13 @@ export async function renderHouse(view, ctx, fresh = null) {
   if (isMember && getHouse(house.id)) saveHouse(house.id, { name: house.name, emoji: house.emoji, member: me });
 
   const memberById = Object.fromEntries(allMembers.map((m) => [m.id, m]));
-  const f = filterState.get(ctx.token) || { text: '', tags: new Set(), loved: new Set(), diff: new Set(), sort: 'new', open: window.innerWidth >= 768 };
+  const f = filterState.get(ctx.token) || { text: '', tags: new Set(), loved: new Set(), diff: new Set(), sort: 'new', reverse: false, open: window.innerWidth >= 768 };
   filterState.set(ctx.token, f);
+  if (!SORTS.some((x) => x.id === f.sort)) f.sort = 'new';
+  const pick = picking.get(ctx.token) || { on: false, ids: new Set() };
+  picking.set(ctx.token, pick);
+  // מתכון שנמחק לא נשאר בבחירה
+  [...pick.ids].forEach((id) => !recipes.some((r) => r.id === id) && pick.ids.delete(id));
 
   const lovedBy = (r) => r.ratings.filter((x) => x.score >= LOVED_SCORE).map((x) => x.member_id);
 
@@ -93,7 +129,9 @@ export async function renderHouse(view, ctx, fresh = null) {
     <div class="mb-6">${quoteCard(true)}</div>
 
     <div class="mb-5 flex flex-wrap gap-2">
-      ${isMember ? `<a href="${ctx.base}/edit/new" class="btn-primary">➕ מתכון חדש</a>` : ''}
+      ${isMember ? `<a href="${ctx.base}/edit/new" class="btn-primary">➕ מתכון חדש</a>
+        <button data-import class="btn-primary bg-honey-500 hover:bg-spice-500">✨ מתכון מקישור / טקסט</button>` : ''}
+      <button id="pick-toggle" class="btn-soft">🛒 קניות לכמה מתכונים</button>
       <a href="${ctx.base}/timeline" class="btn-sage">📅 מה בישלנו</a>
       ${isMember ? `<a href="${ctx.base}/tags" class="btn-soft">🏷️ ניהול תגיות</a>` : ''}
     </div>
@@ -131,15 +169,22 @@ export async function renderHouse(view, ctx, fresh = null) {
 
     <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
       <p id="result-line" class="text-sm text-cocoa-500"></p>
-      <label class="flex items-center gap-2 text-sm text-cocoa-500">מיון:
+      <div class="flex items-center gap-2 text-sm text-cocoa-500">
+        <label for="sort">מיון:</label>
         <select id="sort" class="rounded-xl border-2 border-cream-200 bg-white px-2 py-1 text-cocoa-700 focus:border-spice-300 focus:outline-none">
           ${SORTS.map((x) => `<option value="${x.id}" ${f.sort === x.id ? 'selected' : ''}>${x.name}</option>`).join('')}
         </select>
-      </label>
+        <button id="reverse" class="rounded-xl border-2 border-cream-200 bg-white px-2 py-1 text-cocoa-700 hover:border-spice-300" title="הפיכת הסדר" aria-pressed="${f.reverse}">${f.reverse ? '⬆️' : '⬇️'}</button>
+      </div>
     </div>
-    <section id="grid" class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3"></section>`);
+    <p id="sort-note" class="mb-3 hidden text-xs text-cocoa-500"></p>
+    <div id="pick-help" class="mb-4 hidden rounded-2xl bg-honey-100 px-4 py-3 text-sm">🛒 לחצו על המתכונים שתרצו לבשל, ונאחד לכם את כל המצרכים לרשימה אחת.</div>
+    <section id="grid" class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3"></section>
+    <div id="pick-bar" class="sticky bottom-3 z-10 mt-5 hidden"></div>`);
 
   const recipeHref = (r) => `${ctx.base}/r/${r.id}`;
+  // אנימציית הכניסה רק בציור הראשון, לא בכל לחיצה
+  let firstDraw = true;
 
   function card(r, i) {
     const cover = r.cover
@@ -150,9 +195,10 @@ export async function renderHouse(view, ctx, fresh = null) {
     const loved = lovedBy(r).map((id) => memberById[id]).filter(Boolean);
     const time = totalTime(r);
     return `
-      <a href="${recipeHref(r)}" class="card group flex flex-col overflow-hidden transition hover:-translate-y-1 hover:shadow-lift animate-rise" style="animation-delay:${Math.min(i, 8) * 40}ms">
+      <a href="${recipeHref(r)}" data-recipe="${r.id}" class="card group flex flex-col overflow-hidden transition hover:-translate-y-1 hover:shadow-lift ${firstDraw ? 'animate-rise' : ''} ${pick.on && pick.ids.has(r.id) ? 'ring-4 ring-sage-500' : ''}" style="animation-delay:${Math.min(i, 8) * 40}ms">
         <div class="relative aspect-[4/3] overflow-hidden bg-cream-200">
           ${cover}
+          ${pick.on ? `<span class="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-lg shadow-soft ${pick.ids.has(r.id) ? 'bg-sage-500 text-white' : 'bg-white/80'}">${pick.ids.has(r.id) ? '✓' : ''}</span>` : ''}
           ${loved.length ? `<div class="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-white/90 py-0.5 pl-1 pr-2 text-xs shadow-soft">❤️
              <span class="flex -space-x-1.5 space-x-reverse">${loved.slice(0, 4).map((m) => avatar(m, 6)).join('')}</span></div>` : ''}
         </div>
@@ -163,6 +209,7 @@ export async function renderHouse(view, ctx, fresh = null) {
             ${difficultyIcons(r.difficulty, 'text-sm')}
             <span class="flex items-center gap-2">
               ${r.kcal_per_serving ? `<span title="קלוריות למנה (הערכה)">🔥 ${Math.round(r.kcal_per_serving)}</span>` : ''}
+              ${r.price_per_serving ? `<span title="מחיר משוער למנה">₪${r.price_per_serving < 10 ? Number(r.price_per_serving.toFixed(1)) : Math.round(r.price_per_serving)}</span>` : ''}
               ${time ? `<span>⏱️ ${time}</span>` : ''}
             </span>
           </div>
@@ -209,7 +256,13 @@ export async function renderHouse(view, ctx, fresh = null) {
     badge.textContent = count;
     badge.classList.toggle('hidden', !count);
 
-    const list = recipes.filter(matches).sort(SORTERS[f.sort] || SORTERS.new);
+    const list = recipes.filter(matches).sort(sorter(f.sort, f.reverse));
+    const sortDef = SORTS.find((x) => x.id === f.sort);
+    const note = $('#sort-note', view.app);
+    const missingInfo = list.filter((r) => sortDef.key(r) == null).length;
+    note.classList.toggle('hidden', !missingInfo || !sortDef.needs);
+    note.textContent = sortDef.needs ? `${missingInfo} מתכונים עוד בלי חישוב ${sortDef.needs === 'price' ? 'מחיר' : 'קלוריות'} מופיעים בסוף (אפשר לחשב בדף המתכון ✨)` : '';
+    drawPickBar();
     const grid = $('#grid', view.app);
     const line = $('#result-line', view.app);
     const filtering = count || f.text.trim();
@@ -231,6 +284,7 @@ export async function renderHouse(view, ctx, fresh = null) {
     } else {
       grid.innerHTML = list.map(card).join('');
     }
+    firstDraw = false;
   }
 
   $('#q', view.app).addEventListener('input', (e) => {
@@ -248,6 +302,89 @@ export async function renderHouse(view, ctx, fresh = null) {
     f.sort = e.target.value;
     update();
   });
+  $('#reverse', view.app).addEventListener('click', (e) => {
+    f.reverse = !f.reverse;
+    e.currentTarget.textContent = f.reverse ? '⬆️' : '⬇️';
+    e.currentTarget.setAttribute('aria-pressed', String(f.reverse));
+    update();
+  });
+
+  // ---------- בחירת מתכונים לרשימת קניות ----------
+  function drawPickBar() {
+    const bar = $('#pick-bar', view.app);
+    $('#pick-help', view.app).classList.toggle('hidden', !pick.on);
+    $('#pick-toggle', view.app).classList.toggle('is-on', pick.on);
+    $('#pick-toggle', view.app).textContent = pick.on ? '✖ סיום בחירה' : '🛒 קניות לכמה מתכונים';
+    bar.classList.toggle('hidden', !pick.on);
+    if (!pick.on) return;
+    const n = pick.ids.size;
+    bar.innerHTML = `<div class="flex items-center gap-2 rounded-3xl bg-cream-100/95 p-2 shadow-lift backdrop-blur">
+      <span class="px-2 text-sm">נבחרו <b>${n}</b></span>
+      ${n ? '<button data-pick-clear class="btn-ghost btn-sm">ניקוי</button>' : ''}
+      <a href="${ctx.base}/shop/${[...pick.ids].join(',')}" class="btn-primary flex-1 ${n ? '' : 'pointer-events-none opacity-50'}">🛒 לרשימה המשותפת</a>
+    </div>`;
+  }
+  $('#pick-toggle', view.app).addEventListener('click', () => {
+    pick.on = !pick.on;
+    update();
+  });
+  $('#pick-bar', view.app).addEventListener('click', (e) => {
+    if (e.target.closest('[data-pick-clear]')) {
+      pick.ids.clear();
+      update();
+    }
+    if (e.target.closest('a[href*="/shop/"]')) pick.on = false;
+  });
+  $('#grid', view.app).addEventListener('click', (e) => {
+    if (!pick.on) return;
+    const a = e.target.closest('[data-recipe]');
+    if (!a) return;
+    e.preventDefault();
+    const id = a.dataset.recipe;
+    pick.ids.has(id) ? pick.ids.delete(id) : pick.ids.add(id);
+    const y = window.scrollY;
+    update();
+    window.scrollTo({ top: y });
+  });
+
+  // ---------- מתכון מקישור או מטקסט ----------
+  function openImport(prefill = '') {
+    const { el, close } = modal(`
+      <h2 class="mb-1 text-2xl">✨ מתכון מקישור או מטקסט</h2>
+      <p class="mb-4 text-sm text-cocoa-500">הדביקו כאן קישור למתכון (אתר, אינסטגרם, יוטיוב), או את הטקסט שלו, למשל הודעה מוואטסאפ. אנחנו נמלא את הטופס, ואתם רק בודקים ושומרים.</p>
+      <textarea name="src" class="input min-h-[120px]" dir="auto" placeholder="https://...">${esc(prefill)}</textarea>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <button class="btn-primary flex-1" data-go>✨ למלא לי את המתכון</button>
+        ${navigator.clipboard?.readText ? '<button class="btn-soft" data-paste>📋 הדבקה</button>' : ''}
+        <button class="btn-soft" data-close>ביטול</button>
+      </div>
+      <p class="mt-3 text-xs leading-relaxed text-cocoa-500">⏱️ לוקח בדרך כלל 5–30 שניות.<br>💡 טיפ לאנדרואיד: אחרי שמתקינים את האפליקציה, אפשר ללחוץ "שיתוף" על מתכון בכל אפליקציה ולבחור "המתכונים".</p>`);
+    const area = el.querySelector('[name=src]');
+    el.querySelector('[data-paste]')?.addEventListener('click', async () => {
+      try {
+        area.value = await navigator.clipboard.readText();
+      } catch {
+        toast('לא הצלחנו לקרוא מהלוח. אפשר להדביק ידנית (לחיצה ארוכה ← הדבקה)', 'error');
+      }
+    });
+    const go = el.querySelector('[data-go]');
+    go.addEventListener('click', () => {
+      if (!area.value.trim()) return toast('הדביקו קודם קישור או טקסט 📋', 'error');
+      busy(go, async () => {
+        go.innerHTML = '<span class="animate-spin inline-block">🥄</span> קוראים את המתכון...';
+        const r = await importRecipe(ctx.token, area.value);
+        saveImportedDraft(ctx.houseId, r);
+        close();
+        toast('המתכון מוכן לבדיקה ✨');
+        location.hash = `${ctx.base}/edit/new`;
+      });
+    });
+  }
+  view.app.querySelector('[data-import]')?.addEventListener('click', () => openImport());
+  if (isMember) {
+    const shared = takeShared();
+    if (shared) openImport(shared);
+  }
   $('#toggle-filters', view.app).addEventListener('click', () => {
     f.open = !f.open;
     $('#filters', view.app).classList.toggle('hidden', !f.open);

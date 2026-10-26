@@ -51,6 +51,30 @@ function textToIngredients(text) {
     .map((l) => (/[:׃]$/.test(l) && l.length > 1 ? { text: l.replace(/[:׃]$/, '').trim(), header: true } : { text: l.replace(/^[-•*▫️]\s*/u, '') }));
 }
 
+// טיוטה ממתכון שיובא (מקישור או מטקסט). base: טיוטה קיימת שמשלימים אותה
+export function importedDraft(r, base = {}) {
+  return {
+    title: r.title,
+    description: r.description,
+    difficulty: r.difficulty || 2,
+    prep: r.prep_minutes ?? '',
+    cook: r.cook_minutes ?? '',
+    servings: r.servings ?? '',
+    servings_count: r.servings_count ?? '',
+    baseUpdatedAt: base.baseUpdatedAt ?? null,
+    source_url: r.source_url || base.source_url || '',
+    ingredients: ingredientsToText(r.ingredients),
+    steps: r.steps.length ? r.steps : [''],
+    tags: [...new Set([...(base.tags || []), ...r.tag_ids])],
+    images: [...(base.images || []), ...r.images].slice(0, MAX_IMAGES),
+    originalPaths: base.originalPaths || [],
+    importNotes: r.notes || '',
+  };
+}
+
+// שומר מתכון שיובא כטיוטה של "מתכון חדש", כדי שהעורך ייפתח איתו
+export const saveImportedDraft = (houseId, r) => storeDraft(draftKey({ houseId }, null), importedDraft(r));
+
 export async function renderEditor(view, ctx, recipeId) {
   view.app.innerHTML = loading(recipeId ? 'פותחים את המתכון לעריכה...' : 'מכינים דף חדש...');
   const [house, existing] = await Promise.all([
@@ -297,23 +321,7 @@ export async function renderEditor(view, ctx, recipeId) {
     await busy(button, async () => {
       const r = await importRecipe(ctx.token, input);
       finished = true;
-      storeDraft(key, {
-        title: r.title,
-        description: r.description,
-        difficulty: r.difficulty || 2,
-        prep: r.prep_minutes ?? '',
-        cook: r.cook_minutes ?? '',
-        servings: r.servings ?? '',
-        servings_count: r.servings_count ?? '',
-        baseUpdatedAt: d.baseUpdatedAt,
-        source_url: r.source_url || $('#f-link', app).value,
-        ingredients: ingredientsToText(r.ingredients),
-        steps: r.steps.length ? r.steps : [''],
-        tags: [...new Set([...selectedTags, ...r.tag_ids])],
-        images: [...images, ...r.images].slice(0, MAX_IMAGES),
-        originalPaths,
-        importNotes: r.notes || '',
-      });
+      storeDraft(key, importedDraft(r, { baseUpdatedAt: d.baseUpdatedAt, source_url: $('#f-link', app).value, tags: [...selectedTags], images, originalPaths }));
       toast('הטופס מולא ✨ עברו ובדקו');
       await renderEditor(view, ctx, recipeId);
       window.scrollTo({ top: 0 });
