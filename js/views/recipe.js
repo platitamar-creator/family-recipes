@@ -1,6 +1,6 @@
 // מסך מתכון: תמונות, מצרכים (עם רשימת קניות לוואטסאפ), שלבים,
 // אפשרויות לשינוי, דירוגי בני הבית ויומן הערות.
-import { rpc, rpcCached, imageUrl, analyzeNutrition } from '../api.js';
+import { rpc, rpcCached, imageUrl, analyzeNutrition, forgetCache } from '../api.js';
 import { getChecks, setChecks, getGuestName, setGuestName } from '../store.js';
 import {
   esc, multiline, avatar, loading, difficultyIcons, tagChip, totalTime, timeAgo, formatDate,
@@ -113,9 +113,16 @@ export async function renderRecipe(view, ctx, recipeId, cached = null, { fresh =
         ${r.created_by ? `נוסף ע״י ${esc(r.created_by.name)} · ` : ''}${formatDate(r.created_at)}
         ${r.updated_by && r.updated_at !== r.created_at ? ` · עודכן ${timeAgo(r.updated_at)} ע״י ${esc(r.updated_by.name)}` : ''}
       </p>
+      ${r.untried ? `
+        <div class="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border-2 border-dashed border-cocoa-300 bg-cream-100 p-3 no-print">
+          <span class="text-2xl">🕰️</span>
+          <span class="min-w-0 flex-1 text-sm"><b>עוד לא הכנו את זה.</b> המתכון מוצג אפור בספר ולא מופיע בסינונים. כשתלחצו "הכנתי!" הסימון יורד לבד.</span>
+          ${isMember ? '<button data-action="untried" data-value="false" class="btn-soft btn-sm">להסיר סימון</button>' : ''}
+        </div>` : ''}
       ${isMember || cooks.length ? `
         <div class="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-sage-100 p-3 no-print">
           ${isMember ? '<button data-action="cooked" class="btn-sage wiggle-hover">👩‍🍳 הכנתי!</button>' : ''}
+          ${isMember && !r.untried && !cooks.length ? '<button data-action="untried" data-value="true" class="btn-soft btn-sm" title="שמרנו לניסיון: יוצג אפור ולא יופיע בסינונים">🕰️ עוד לא הכנו</button>' : ''}
           <span class="text-sm text-sage-700">${cooks.length
             ? `בושל ${cooks.length === 1 ? 'פעם אחת' : `${cooks.length} פעמים`} · לאחרונה ${cookedAgo(cooks[0].cooked_on)}`
             : 'עוד לא סימנו שמישהו הכין את זה. מי ראשון? 🏁'}</span>
@@ -569,6 +576,14 @@ export async function renderRecipe(view, ctx, recipeId, cached = null, { fresh =
         await reload();
       });
     },
+    untried: (el) =>
+      busy(el, async () => {
+        const value = el.dataset.value === 'true';
+        await rpc('set_untried', { p_token: ctx.token, p_recipe_id: r.id, p_value: value });
+        forgetCache('get_house', { p_token: ctx.token });
+        toast(value ? 'סומן "עוד לא הכנו" 🕰️' : 'הסימון הוסר ✓');
+        await reload();
+      }),
     pin: (el) =>
       busy(el, async () => {
         await rpc('pin_comment', { p_token: ctx.token, p_id: el.dataset.id, p_pinned: el.dataset.pinned !== 'true' });

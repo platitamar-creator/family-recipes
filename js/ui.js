@@ -232,6 +232,43 @@ export async function busy(button, fn) {
   }
 }
 
-export const EMOJIS = ['🏠', '🏡', '🍲', '🥘', '🍰', '🥐', '🍕', '🌮', '🫖', '🧁', '🍋', '🌻', '🐓', '❤️'];
+export const EMOJIS = [
+  '🏠', '🏡', '🏘️', '🍲', '🥘', '🫕', '🍳', '🥗', '🍝', '🍜', '🍛', '🍣', '🍕', '🌮', '🥙', '🧆',
+  '🥐', '🍞', '🥯', '🧀', '🍰', '🎂', '🧁', '🍪', '🥧', '🍩', '🍫', '🍯', '🫖', '☕', '🍷', '🍋',
+  '🍅', '🥑', '🥕', '🌶️', '🧄', '🍓', '🍉', '🌻', '🌿', '🐓', '🐟', '🐻', '🐱', '🐶', '❤️', '⭐',
+];
+
+// בחירת אמוג'י: מהרשימה, או כל אמוג'י אחר מהמקלדת
+export function emojiPicker(current) {
+  return `<div class="flex flex-wrap gap-1.5" data-emojis>
+      ${EMOJIS.map((e) => `<button type="button" data-emoji="${e}" class="h-10 w-10 rounded-xl text-xl ${e === current ? 'bg-spice-100 ring-2 ring-spice-400' : 'hover:bg-cream-200'}">${e}</button>`).join('')}
+    </div>
+    <label class="mt-2 flex items-center gap-2 text-sm text-cocoa-500">או כל אמוג'י אחר:
+      <input data-emoji-custom class="input w-20 py-1.5 text-center text-xl" maxlength="16" value="${EMOJIS.includes(current) ? '' : esc(current)}" placeholder="😀">
+    </label>`;
+}
+
+// מחבר את הבחירה; set נקרא עם האמוג'י שנבחר
+export function bindEmojiPicker(root, set) {
+  const custom = root.querySelector('[data-emoji-custom]');
+  const mark = (b) => root.querySelectorAll('[data-emoji]').forEach((x) => {
+    x.classList.toggle('bg-spice-100', x === b);
+    x.classList.toggle('ring-2', x === b);
+    x.classList.toggle('ring-spice-400', x === b);
+  });
+  root.querySelector('[data-emojis]').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-emoji]');
+    if (!b) return;
+    custom.value = '';
+    mark(b);
+    set(b.dataset.emoji);
+  });
+  custom.addEventListener('input', () => {
+    const v = [...new Intl.Segmenter().segment(custom.value.trim())].map((x) => x.segment)[0] || '';
+    if (!v) return;
+    mark(null);
+    set(v);
+  });
+}
 export const COLORS = ['#E07A3F', '#7A9E7E', '#D4A24C', '#C4626B', '#6C8EAD', '#9C7BB0', '#B5835A', '#5E9C94'];
 export const TAG_COLORS = ['#F6D5CF', '#FBE0C8', '#FBE7B5', '#FFF0C2', '#E3EEDC', '#D5E8E4', '#DCE9F5', '#DAD7EE', '#F8D9E6', '#EADFCF'];

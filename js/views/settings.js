@@ -1,7 +1,7 @@
 // שיתוף והגדרות: קישורי צפייה והצטרפות, שם הבית, הפרופיל שלי
 import { rpc, deleteImages, thumbImg } from '../api.js';
 import { saveHouse, removeHouse } from '../store.js';
-import { esc, loading, avatar, copyText, whatsappUrl, confirmDialog, onAction, busy, toast, timeAgo, $, EMOJIS, COLORS } from '../ui.js';
+import { esc, loading, avatar, copyText, whatsappUrl, confirmDialog, onAction, busy, toast, timeAgo, $, emojiPicker, bindEmojiPicker, COLORS } from '../ui.js';
 import { topBar, shareLinks } from './common.js';
 
 export async function renderSettings(view, ctx) {
@@ -57,9 +57,7 @@ export async function renderSettings(view, ctx) {
       <h2 class="section-title mb-4">🏡 הבית</h2>
       <form id="house-form" class="space-y-3">
         <input name="name" class="input" maxlength="60" required value="${esc(house.name)}">
-        <div class="flex flex-wrap gap-1.5" data-emojis>
-          ${EMOJIS.map((e) => `<button type="button" data-emoji="${e}" class="h-10 w-10 rounded-xl text-xl ${e === house.emoji ? 'bg-spice-100 ring-2 ring-spice-400' : 'hover:bg-cream-200'}">${e}</button>`).join('')}
-        </div>
+        <div><span class="label">האמוג'י של הבית</span>${emojiPicker(house.emoji)}</div>
         <button class="btn-primary btn-sm" type="submit">שמירה</button>
       </form>
     </section>
@@ -124,7 +122,7 @@ export async function renderSettings(view, ctx) {
         offClass.forEach((c) => x.classList.toggle(c, x !== b));
       });
     });
-  picker('[data-emojis]', 'data-emoji', (v) => (emoji = v), ['bg-spice-100', 'ring-2', 'ring-spice-400'], []);
+  bindEmojiPicker($('#house-form', app), (v) => (emoji = v));
   picker('[data-colors]', 'data-color', (v) => (color = v), ['border-cocoa-700'], ['border-white']);
 
   $('#house-form', app).addEventListener('submit', (e) => {

@@ -1,7 +1,7 @@
 // מסך הבית: כל המתכונים, חיפוש וסינון לפי תגיות שמגיעות ממסד הנתונים
-import { rpcCached, thumbImg, importRecipe } from '../api.js';
+import { rpc, rpcCached, thumbImg, importRecipe, forgetCache } from '../api.js';
 import { saveHouse, getHouse } from '../store.js';
-import { esc, avatar, quoteCard, loading, difficultyIcons, totalTime, tagChip, modal, busy, toast, $, $$ } from '../ui.js';
+import { esc, avatar, quoteCard, loading, difficultyIcons, totalTime, tagChip, modal, busy, toast, emojiPicker, bindEmojiPicker, $, $$ } from '../ui.js';
 import { saveImportedDraft } from './editor.js';
 import { topBar } from './common.js';
 import { panSVG } from '../decor.js';
@@ -89,9 +89,11 @@ export async function renderHouse(view, ctx, fresh = null) {
   if (isMember && getHouse(house.id)) saveHouse(house.id, { name: house.name, emoji: house.emoji, member: me });
 
   const memberById = Object.fromEntries(allMembers.map((m) => [m.id, m]));
-  const f = filterState.get(ctx.token) || { text: '', tags: new Set(), loved: new Set(), diff: new Set(), sort: 'new', reverse: false, open: window.innerWidth >= 768 };
+  const f = filterState.get(ctx.token) || { text: '', tags: new Set(), loved: new Set(), diff: new Set(), untried: new Set(), sort: 'new', reverse: false, open: window.innerWidth >= 768 };
   filterState.set(ctx.token, f);
   if (!SORTS.some((x) => x.id === f.sort)) f.sort = 'new';
+  f.untried ||= new Set();
+  const untriedCount = recipes.filter((r) => r.untried).length;
   const pick = picking.get(ctx.token) || { on: false, ids: new Set() };
   picking.set(ctx.token, pick);
   // מתכון שנמחק לא נשאר בבחירה
@@ -108,13 +110,14 @@ export async function renderHouse(view, ctx, fresh = null) {
 
     <section class="hero mb-5 px-5 pb-9 pt-6 sm:px-8 animate-rise">
       <div class="relative flex items-center gap-4">
-        <span class="relative flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-white text-5xl shadow-lift wiggle-hover">
+        <span ${isMember ? 'data-house-emoji role="button" tabindex="0" title="החלפת האמוג\'י של הבית"' : ''} class="relative flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-white text-5xl shadow-lift wiggle-hover ${isMember ? 'cursor-pointer' : ''}">
           <svg class="absolute -top-9 left-1/2 h-10 w-12 -translate-x-1/2" viewBox="-30 -46 60 50" aria-hidden="true">
             <g class="steam" stroke="#FFFBF5" stroke-width="5" stroke-linecap="round" fill="none">
               <path class="steam-1" d="M-14 0 C-22 -14 -6 -22 -14 -36"/><path class="steam-2" d="M0 -4 C-8 -18 8 -26 0 -42"/><path class="steam-3" d="M14 0 C6 -14 22 -22 14 -36"/>
             </g>
           </svg>
           ${esc(house.emoji)}
+          ${isMember ? '<span class="absolute -bottom-1 -left-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm shadow-soft">✏️</span>' : ''}
         </span>
         <div class="min-w-0">
           <p class="text-sm text-white/80">ספר המתכונים של</p>
@@ -161,6 +164,10 @@ export async function renderHouse(view, ctx, fresh = null) {
           <span class="ml-1 w-full text-sm font-medium text-cocoa-500 sm:w-28">🥄 רמת קושי</span>
           ${DIFF_BUCKETS.map((d) => `<button class="chip-toggle" aria-pressed="false" data-kind="diff" data-id="${d.id}">${d.name}</button>`).join('')}
         </div>
+        ${untriedCount ? `<div class="flex flex-wrap items-center gap-2">
+          <span class="ml-1 w-full text-sm font-medium text-cocoa-500 sm:w-28">🕰️ לניסיון</span>
+          <button class="chip-toggle" aria-pressed="false" data-kind="untried" data-id="only">רק מה שעוד לא הכנו (${untriedCount})</button>
+        </div>` : ''}
         <div class="flex justify-end">
           <button id="clear" class="btn-ghost btn-sm">ניקוי הסינון ✖</button>
         </div>
@@ -195,9 +202,10 @@ export async function renderHouse(view, ctx, fresh = null) {
     const loved = lovedBy(r).map((id) => memberById[id]).filter(Boolean);
     const time = totalTime(r);
     return `
-      <a href="${recipeHref(r)}" data-recipe="${r.id}" class="card group flex flex-col overflow-hidden transition hover:-translate-y-1 hover:shadow-lift ${firstDraw ? 'animate-rise' : ''} ${pick.on && pick.ids.has(r.id) ? 'ring-4 ring-sage-500' : ''}" style="animation-delay:${Math.min(i, 8) * 40}ms">
+      <a href="${recipeHref(r)}" data-recipe="${r.id}" class="card group flex flex-col overflow-hidden transition hover:-translate-y-1 hover:shadow-lift ${firstDraw ? 'animate-rise' : ''} ${r.untried ? 'is-untried' : ''} ${pick.on && pick.ids.has(r.id) ? 'ring-4 ring-sage-500' : ''}" style="animation-delay:${Math.min(i, 8) * 40}ms">
         <div class="relative aspect-[4/3] overflow-hidden bg-cream-200">
-          ${cover}
+          <div class="cover h-full w-full">${cover}</div>
+          ${r.untried ? '<span class="absolute inset-x-0 top-1/2 mx-auto w-fit -translate-y-1/2 rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-cocoa-700 shadow-soft">🕰️ עוד לא הכנו</span>' : ''}
           ${pick.on ? `<span class="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-lg shadow-soft ${pick.ids.has(r.id) ? 'bg-sage-500 text-white' : 'bg-white/80'}">${pick.ids.has(r.id) ? '✓' : ''}</span>` : ''}
           ${loved.length ? `<div class="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-white/90 py-0.5 pl-1 pr-2 text-xs shadow-soft">❤️
              <span class="flex -space-x-1.5 space-x-reverse">${loved.slice(0, 4).map((m) => avatar(m, 6)).join('')}</span></div>` : ''}
@@ -240,6 +248,9 @@ export async function renderHouse(view, ctx, fresh = null) {
       if (![...f.loved].some((id) => l.includes(id))) return false;
     }
     if (f.diff.size && !DIFF_BUCKETS.some((d) => f.diff.has(d.id) && d.test(r.difficulty))) return false;
+    // "עוד לא הכנו": רק אם ביקשו אותם במפורש. בלי סינון הם מופיעים בנפרד בסוף
+    if (f.untried.has('only')) return r.untried;
+    if (r.untried && (f.text.trim() || f.tags.size || f.loved.size || f.diff.size)) return false;
     return true;
   }
 
@@ -251,12 +262,15 @@ export async function renderHouse(view, ctx, fresh = null) {
       b.classList.toggle('is-on', on);
       b.setAttribute('aria-pressed', String(on));
     });
-    const count = f.tags.size + f.loved.size + f.diff.size;
+    const count = f.tags.size + f.loved.size + f.diff.size + f.untried.size;
     const badge = $('#filter-count', view.app);
     badge.textContent = count;
     badge.classList.toggle('hidden', !count);
 
-    const list = recipes.filter(matches).sort(sorter(f.sort, f.reverse));
+    const all = recipes.filter(matches).sort(sorter(f.sort, f.reverse));
+    const onlyUntried = f.untried.has('only');
+    const list = onlyUntried ? all : all.filter((r) => !r.untried);
+    const later = onlyUntried ? [] : all.filter((r) => r.untried);
     const sortDef = SORTS.find((x) => x.id === f.sort);
     const note = $('#sort-note', view.app);
     const missingInfo = list.filter((r) => sortDef.key(r) == null).length;
@@ -275,14 +289,18 @@ export async function renderHouse(view, ctx, fresh = null) {
         <p class="mb-5 text-cocoa-500">מישהו פה בכלל מבשל? 😄 זה הזמן להעלות את המתכון הראשון!</p>
         ${isMember ? `<a href="${ctx.base}/edit/new" class="btn-primary">➕ המתכון הראשון</a>` : ''}
       </div>`;
-    } else if (!list.length) {
+    } else if (!list.length && !later.length) {
       grid.innerHTML = `<div class="col-span-full card p-10 text-center">
         <div class="mb-3 text-6xl">🕵️</div>
         <h2 class="mb-2 text-2xl">לא מצאנו כלום</h2>
         <p class="text-cocoa-500">אולי כדאי לוותר על אחד המסננים? או להזמין פיצה 🍕</p>
       </div>`;
     } else {
-      grid.innerHTML = list.map(card).join('');
+      grid.innerHTML = list.map(card).join('') + (later.length ? `
+        <div class="col-span-full mt-4 flex flex-wrap items-baseline gap-x-3 border-t-2 border-dashed border-cream-300 pt-5">
+          <h2 class="text-2xl text-cocoa-500">🕰️ עוד לא הכנו (${later.length})</h2>
+          <span class="text-sm text-cocoa-500">מתכונים ששמרנו לניסיון. אחרי "הכנתי!" הם עוברים לספר.</span>
+        </div>${later.map((r, i) => card(r, list.length + i)).join('')}` : '');
     }
     firstDraw = false;
   }
@@ -381,6 +399,28 @@ export async function renderHouse(view, ctx, fresh = null) {
     });
   }
   view.app.querySelector('[data-import]')?.addEventListener('click', () => openImport());
+
+  // ---------- החלפת האמוג'י של הבית ----------
+  const emojiBtn = view.app.querySelector('[data-house-emoji]');
+  const openEmoji = () => {
+    let chosen = house.emoji;
+    const { el, close } = modal(`
+      <h2 class="mb-4 text-2xl">האמוג'י של הבית</h2>
+      ${emojiPicker(house.emoji)}
+      <div class="mt-5 flex gap-2"><button class="btn-primary flex-1" data-save>שמירה</button><button class="btn-soft" data-close>ביטול</button></div>`);
+    bindEmojiPicker(el, (v) => (chosen = v));
+    const save = el.querySelector('[data-save]');
+    save.addEventListener('click', () => busy(save, async () => {
+      await rpc('update_house', { p_token: ctx.token, p_name: house.name, p_emoji: chosen });
+      saveHouse(house.id, { emoji: chosen });
+      forgetCache('get_house', { p_token: ctx.token });
+      close();
+      toast('הבית קיבל אמוג\'י חדש ' + chosen);
+      renderHouse(view, ctx);
+    }));
+  };
+  emojiBtn?.addEventListener('click', openEmoji);
+  emojiBtn?.addEventListener('keydown', (e) => e.key === 'Enter' && openEmoji());
   if (isMember) {
     const shared = takeShared();
     if (shared) openImport(shared);

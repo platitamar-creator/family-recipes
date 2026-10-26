@@ -40,6 +40,11 @@
     background-size: 100% 32px;
   }
   .sticky-note { @apply bg-honey-100 rounded-2xl shadow-soft; }
+  /* "עוד לא הכנו": אפור ומטושטש */
+  .is-untried { opacity: .75; }
+  .is-untried .cover { filter: grayscale(1) blur(2px); opacity: .7; }
+  .is-untried h3 { @apply text-cocoa-500; }
+  .is-untried:hover { opacity: 1; }
 
   /* פס מפת שולחן משובצת בראש העמוד, עם שוליים מסולסלים */
   .gingham {

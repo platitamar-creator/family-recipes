@@ -69,6 +69,8 @@ export function importedDraft(r, base = {}) {
     images: [...(base.images || []), ...r.images].slice(0, MAX_IMAGES),
     originalPaths: base.originalPaths || [],
     importNotes: r.notes || '',
+    // מתכון מהאינטרנט בדרך כלל עוד לא נוסה
+    untried: base.untried ?? true,
   };
 }
 
@@ -106,6 +108,7 @@ export async function renderEditor(view, ctx, recipeId) {
     // תמונות: קיימות (path) או חדשות (file)
     images: r.images.map((img) => ({ path: img.path, width: img.width, height: img.height })),
     originalPaths: r.images.map((img) => img.path),
+    untried: !!r.untried,
   };
   const selectedTags = new Set(d.tags.filter((id) => allTagIds.has(id)));
   let images = d.images;
@@ -165,6 +168,10 @@ export async function renderEditor(view, ctx, recipeId) {
           <div><label class="label" for="f-serv">גודל / הערה</label><input id="f-serv" class="input" maxlength="40" value="${esc(d.servings)}" placeholder="תבנית 24×34"></div>
         </div>
         <p class="-mt-2 text-xs text-cocoa-500">"מספר מנות" משמש לחישוב ערכים ומחיר למנה.</p>
+        <label class="flex cursor-pointer items-start gap-3 rounded-2xl bg-cream-100 px-3 py-2.5">
+          <input id="f-untried" type="checkbox" ${d.untried ? 'checked' : ''} class="mt-1 h-5 w-5 shrink-0 accent-cocoa-500">
+          <span class="text-sm"><b>🕰️ עוד לא הכנו</b><br><span class="text-cocoa-500">שמרנו לניסיון: יוצג אפור ולא יופיע בסינונים, עד שמישהו ילחץ "הכנתי!"</span></span>
+        </label>
         <div>
           <label class="label" for="f-link">🔗 קישור למתכון באינטרנט (לא חובה)</label>
           <input id="f-link" type="text" inputmode="url" autocomplete="off" spellcheck="false" dir="ltr" class="input text-left" maxlength="1000" value="${esc(d.source_url)}" placeholder="https://...">
@@ -309,6 +316,7 @@ export async function renderEditor(view, ctx, recipeId) {
       images,
       originalPaths,
       importNotes: d.importNotes,
+      untried: $('#f-untried', app).checked,
     });
   }
 
@@ -321,7 +329,7 @@ export async function renderEditor(view, ctx, recipeId) {
     await busy(button, async () => {
       const r = await importRecipe(ctx.token, input);
       finished = true;
-      storeDraft(key, importedDraft(r, { baseUpdatedAt: d.baseUpdatedAt, source_url: $('#f-link', app).value, tags: [...selectedTags], images, originalPaths }));
+      storeDraft(key, importedDraft(r, { untried: recipeId ? $('#f-untried', app).checked : undefined, baseUpdatedAt: d.baseUpdatedAt, source_url: $('#f-link', app).value, tags: [...selectedTags], images, originalPaths }));
       toast('הטופס מולא ✨ עברו ובדקו');
       await renderEditor(view, ctx, recipeId);
       window.scrollTo({ top: 0 });
@@ -508,6 +516,8 @@ export async function renderEditor(view, ctx, recipeId) {
           images: images.map(({ path, width, height }) => ({ path, width, height })),
         },
       });
+      const untried = $('#f-untried', app).checked;
+      if (untried !== !!existing?.recipe?.untried) await rpc('set_untried', { p_token: ctx.token, p_recipe_id: id, p_value: untried });
       const kept = new Set(images.map((i) => i.path));
       await deleteImages(ctx.token, originalPaths.filter((p) => !kept.has(p)));
       finished = true;
