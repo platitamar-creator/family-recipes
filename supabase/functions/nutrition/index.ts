@@ -99,7 +99,7 @@ async function askGemini(apiKey: string, prompt: string) {
       continue;
     }
     const text = await res.text();
-    console.log("gemini", model, res.status, `${Date.now() - started}ms`, res.ok ? "" : text.slice(0, 300));
+    console.log("gemini", model, res.status, `${Date.now() - started}ms`, res.ok ? "" : text.slice(0, 1500).replace(/\s+/g, " "));
     // מודל שלא קיים (הוצא משימוש) → מנסים את הבא ברשימה
     if (res.status === 404 || (res.status === 400 && /not found|not supported/i.test(text))) {
       lastError = `${model}: ${res.status}`;
