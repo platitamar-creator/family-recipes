@@ -27,7 +27,7 @@ Big functions (`get_house`, `get_recipe`, `save_recipe`, `log_cook`) are redefin
 - `images`: sign uploads / delete.
 - `nutrition`: Gemini estimate of nutrition + price per recipe and per serving; the server sums the totals. Limit 40/day per house.
 - `import`: recipe from URL or free text. It first reads schema.org JSON-LD from the page **without AI**; only otherwise does it call Gemini (url_context / YouTube fileData). `polish()` cleans steps, ingredients and titles.
-- AI provider is **Gemini, not Claude** (owner's explicit choice). Secret `GEMINI_API_KEY` is set in Supabase; optional `GEMINI_MODEL`.
+- AI provider today is **Gemini** (chosen to save Claude usage). This is a preference, **not a hard rule**: the owner is open to Claude (Anthropic API) if Gemini becomes a blocker (quota, quality). Propose it with the cost before switching. Secret `GEMINI_API_KEY` is set in Supabase; optional `GEMINI_MODEL`.
   The key is on the **free tier: 20 requests/day per model**, reset ≈10:00 Israel time. The import function also tries fallback models.
 
 ## Frontend map
@@ -49,7 +49,7 @@ recipe, editor (drafts in sessionStorage, conflict handling, import box, untried
 
 ## Owner's preferences
 - Never delete history (archived members keep everything they wrote). Recipe deletion is a 30-day soft delete.
-- No backups needed. Keep costs at zero (free tiers).
+- No backups needed. Prefer zero cost (free tiers); small costs are open to discussion.
 - Warm, homey, funny design. All UI text in Hebrew.
 - Before bulk changes to his data (e.g. text replacement across recipes), check what would change first.
 
